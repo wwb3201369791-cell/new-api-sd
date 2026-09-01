@@ -515,6 +515,9 @@ func RelayTaskFetch(c *gin.Context) {
 		return
 	}
 	if taskErr := relay.RelayTaskFetch(c, relayInfo.RelayMode); taskErr != nil {
+		if respondArkSeedanceError(c, taskErr) {
+			return
+		}
 		respondTaskError(c, taskErr)
 	}
 }
@@ -797,6 +800,15 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 	}
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
 		if pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == "openai_video" && pinned.Operation.Name == "create" {
+			requestPath := ""
+			if c.Request != nil && c.Request.URL != nil {
+				requestPath = c.Request.URL.Path
+			}
+			if relay.IsArkSeedanceTaskPath(requestPath) {
+				diagnostics.present(outcome.Task, "ark_seedance_create")
+				c.JSON(http.StatusOK, gin.H{"id": outcome.Task.TaskID})
+				return
+			}
 			diagnostics.present(outcome.Task, "openai_video_create")
 			c.JSON(http.StatusOK, outcome.Task.ToOpenAIVideo())
 			return
@@ -818,10 +830,71 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 
 func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	newTaskPluginSubmitDiagnostics(c).presentError(taskErr)
+	if respondArkSeedanceError(c, taskErr) {
+		return
+	}
 	if middleware.RespondTaskPluginError(c, taskErr) {
 		return
 	}
 	respondTaskError(c, taskErr)
+}
+
+// respondArkSeedanceError keeps the Volcano-compatible endpoint's error
+// envelope stable while retaining the gateway's internal TaskError handling
+// for all other routes.
+func respondArkSeedanceError(c *gin.Context, taskErr *taskdto.TaskError) bool {
+	if c == nil || taskErr == nil {
+		return false
+	}
+	path := ""
+	if c.Request != nil && c.Request.URL != nil {
+		path = c.Request.URL.Path
+	}
+	if !relay.IsArkSeedanceTaskPath(path) {
+		return false
+	}
+	status := taskErr.StatusCode
+	if status < 400 || status > 599 {
+		status = http.StatusInternalServerError
+	}
+	if taskErr.Code == "task_not_exist" || taskErr.Code == "task_not_found" {
+		status = http.StatusNotFound
+	}
+	code := strings.TrimSpace(taskErr.Code)
+	if code == "" {
+		code = "request_failed"
+	}
+	message := strings.TrimSpace(taskErr.Message)
+	if message == "" || status >= 500 {
+		message = "Request failed"
+	}
+	if status == http.StatusUnauthorized {
+		code, message = "authentication_error", "Authentication failed"
+	} else if status == http.StatusForbidden {
+		code, message = "permission_denied", "Access denied"
+	}
+	errorType := "InternalServerError"
+	switch status {
+	case http.StatusBadRequest:
+		errorType = "BadRequest"
+	case http.StatusUnauthorized:
+		errorType = "Unauthorized"
+	case http.StatusForbidden:
+		errorType = "Forbidden"
+	case http.StatusNotFound:
+		errorType = "NotFound"
+	case http.StatusConflict:
+		errorType = "Conflict"
+	case http.StatusTooManyRequests:
+		errorType = "TooManyRequests"
+	}
+	c.JSON(status, gin.H{"error": gin.H{
+		"code":    code,
+		"message": message,
+		"param":   "",
+		"type":    errorType,
+	}})
+	return true
 }
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）

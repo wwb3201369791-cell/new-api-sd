@@ -28,6 +28,76 @@ func TestTaskModel2DtoNormalizesLegacyAction(t *testing.T) {
 	assert.Equal(t, "firstTailGenerate", task.Action)
 }
 
+func TestArkSeedanceTaskResponseProjectsVolcanoShape(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task-public",
+		Status:     model.TaskStatusInProgress,
+		CreatedAt:  100,
+		UpdatedAt:  120,
+		SubmitTime: 100,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2.0"},
+		Data:       []byte(`{"id":"cgt-upstream","model":"doubao-seedance-2-0-260128","status":"running","created_at":101,"updated_at":119}`),
+	}
+	body, taskErr := buildArkSeedanceTaskResponse(task)
+	require.Nil(t, taskErr)
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "task-public", response["id"])
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
+	assert.Equal(t, "running", response["status"])
+	assert.Equal(t, float64(101), response["created_at"])
+	assert.Equal(t, float64(119), response["updated_at"])
+}
+
+func TestArkSeedanceTaskResponsePreservesDocumentedMetadata(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task-mobile-meta",
+		Status:     model.TaskStatusSuccess,
+		CreatedAt:  1_700_000_001,
+		UpdatedAt:  1_700_000_009,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2.0"},
+	}
+	task.SetData(map[string]any{
+		"model":      "doubao-seedance-2-0-260128",
+		"status":     "succeeded",
+		"resolution": "720p",
+		"ratio":      "16:9",
+		"duration":   5,
+		"seed":       7,
+		"draft":      false,
+	})
+	body, taskErr := buildArkSeedanceTaskResponse(task)
+	require.Nil(t, taskErr)
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(body, &response))
+	assert.Equal(t, "doubao-seedance-2-0-260128", response["model"])
+	assert.Equal(t, "720p", response["resolution"])
+	assert.Equal(t, "16:9", response["ratio"])
+	assert.Equal(t, float64(5), response["duration"])
+	assert.Equal(t, float64(7), response["seed"])
+}
+
+func TestArkSeedanceTaskPathRecognizesCreateAndRetrieve(t *testing.T) {
+	assert.True(t, IsArkSeedanceTaskPath("/api/v3/contents/generations/tasks"))
+	assert.True(t, IsArkSeedanceTaskPath("/api/v3/contents/generations/tasks/cgt-1"))
+	assert.False(t, IsArkSeedanceTaskPath("/api/v3/contents/generations/tasks-extra"))
+}
+
+func TestParseTaskUpstreamErrorPreservesMobileCloudEnvelope(t *testing.T) {
+	taskErr := parseTaskUpstreamError(http.StatusBadRequest, []byte(`{"ErrorCode":"InvalidParameter","ErrorMessage":"duration is invalid"}`))
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "InvalidParameter", taskErr.Code)
+	assert.Equal(t, "duration is invalid", taskErr.Message)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+
+	require.NotNil(t, parseTaskUpstreamError(http.StatusBadGateway, []byte(`{"message":"upstream unavailable"}`)))
+	require.Nil(t, parseTaskUpstreamError(http.StatusBadGateway, []byte(`{"detail":"upstream unavailable"}`)))
+	busyErr := parseTaskUpstreamError(http.StatusBadGateway, []byte(`{"error":{"code":"Busy","message":"try later"}}`))
+	require.NotNil(t, busyErr)
+	assert.Equal(t, "Busy", busyErr.Code)
+	assert.Equal(t, "try later", busyErr.Message)
+}
+
 const mappingOrderSubmitPlugin = `
 export const meta = {apiVersion:1,key:"maporder",name:"Map Order",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task"};
 export function buildSubmitRequest(ctx) {

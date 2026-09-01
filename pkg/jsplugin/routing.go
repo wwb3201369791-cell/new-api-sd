@@ -87,6 +87,12 @@ var hostProtocols = []HostProtocolDefinition{
 		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/videos", BodyKinds: []BodyKind{BodyJSON, BodyMultipart}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}},
 		{Name: "retrieve", Methods: []string{http.MethodGet}, Path: "/v1/videos/:task_id", BodyKinds: []BodyKind{BodyNone}, RequiredProtocolMembers: []string{"render"}},
 		{Name: "content", Methods: []string{http.MethodGet, http.MethodHead}, Path: "/v1/videos/:task_id/content", BodyKinds: []BodyKind{BodyNone}, RequiredDriverHooks: []string{"listArtifacts", "buildContentRequest"}},
+		// Volcano Ark's Seedance API uses the provider-native /api/v3 path
+		// rather than the OpenAI-compatible /v1/videos path.  Keep it in the
+		// same host protocol so one plugin can expose both wire formats while
+		// sharing request decoding, channel selection, polling, and artifacts.
+		{Name: "create", Methods: []string{http.MethodPost}, Path: "/api/v3/contents/generations/tasks", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}},
+		{Name: "retrieve", Methods: []string{http.MethodGet}, Path: "/api/v3/contents/generations/tasks/:task_id", BodyKinds: []BodyKind{BodyNone}, RequiredProtocolMembers: []string{"render"}},
 	}},
 }
 

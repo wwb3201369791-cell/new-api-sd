@@ -125,6 +125,22 @@ func TestPresentTaskSubmissionUsesHostOpenAIVideoCreateReceipt(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "task_id")
 }
 
+func TestRespondArkSeedanceErrorUsesVolcanoEnvelope(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", nil)
+
+	handled := respondArkSeedanceError(c, &dto.TaskError{
+		Code:       "upstream_invalid",
+		Message:    "content is invalid",
+		StatusCode: http.StatusBadRequest,
+	})
+
+	assert.True(t, handled)
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.JSONEq(t, `{"error":{"code":"upstream_invalid","message":"content is invalid","param":"","type":"BadRequest"}}`, recorder.Body.String())
+}
+
 func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {
 	events := make([]string, 0, 3)
 	database := setupTaskSubmissionDatabase(t, false, &events)

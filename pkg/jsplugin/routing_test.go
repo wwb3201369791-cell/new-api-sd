@@ -89,6 +89,13 @@ func TestLookupHostProtocolOperationExcludesRetrieveWithoutModelField(t *testing
 	assert.False(t, ok)
 	_, _, ok = LookupHostProtocolOperation(http.MethodPost, "/v1/responses")
 	assert.True(t, ok)
+	protocol, operation, ok := LookupHostProtocolOperation(http.MethodPost, "/api/v3/contents/generations/tasks")
+	assert.True(t, ok)
+	assert.Equal(t, "openai_video", protocol)
+	assert.Equal(t, "create", operation.Name)
+	_, operation, ok = LookupHostProtocolOperation(http.MethodGet, "/api/v3/contents/generations/tasks/:task_id")
+	assert.False(t, ok, "retrieve operations remain non-claiming without a model field")
+	assert.Empty(t, operation.Name)
 }
 
 func TestPerProtocolModelsNarrowEndpointBindings(t *testing.T) {

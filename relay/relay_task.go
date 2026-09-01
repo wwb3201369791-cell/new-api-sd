@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -348,6 +349,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
+		if upstreamErr := parseTaskUpstreamError(resp.StatusCode, responseBody); upstreamErr != nil {
+			return nil, upstreamErr
+		}
 		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 	}
 
@@ -382,6 +386,58 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Quota:          finalQuota,
 		Immediate:      parsed.Immediate,
 	}, nil
+}
+
+// parseTaskUpstreamError recognizes the error envelopes used by Seedance
+// gateways.  It runs before the plugin submit parser so a rejected create
+// request keeps the provider's code/message instead of becoming a secondary
+// "task_id is empty" error.
+func parseTaskUpstreamError(statusCode int, body []byte) *dto.TaskError {
+	var root map[string]any
+	if len(body) == 0 || common.Unmarshal(body, &root) != nil || root == nil {
+		return nil
+	}
+	value := root
+	if nested, ok := root["error"].(map[string]any); ok {
+		value = nested
+	}
+	code := taskUpstreamErrorString(value["code"])
+	message := taskUpstreamErrorString(value["message"])
+	if code == "" {
+		code = taskUpstreamErrorString(root["ErrorCode"])
+	}
+	if message == "" {
+		message = taskUpstreamErrorString(root["ErrorMessage"])
+	}
+	if code == "" && message == "" {
+		return nil
+	}
+	if code == "" {
+		code = fmt.Sprintf("upstream_http_%d", statusCode)
+	}
+	if message == "" {
+		message = http.StatusText(statusCode)
+	}
+	return service.TaskErrorWrapper(errors.New(message), code, statusCode)
+}
+
+func taskUpstreamErrorString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case json.Number:
+		return typed.String()
+	default:
+		return ""
+	}
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
@@ -457,6 +513,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
+	isArkSeedanceAPI := IsArkSeedanceTaskPath(c.Request.URL.Path)
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -465,6 +522,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
+	if isArkSeedanceAPI {
+		respBody, taskResp = buildArkSeedanceTaskResponse(originTask)
+		return
+	}
+
 	if isOpenAIVideoAPI {
 		adaptor := GetTaskAdaptor(originTask.Platform)
 		if adaptor == nil {
@@ -493,6 +555,185 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
 	return
+}
+
+const arkSeedanceTaskPathPrefix = "/api/v3/contents/generations/tasks/"
+
+// IsArkSeedanceTaskPath reports whether a request uses the Volcano Ark
+// Seedance-compatible task path. Controllers use the same predicate when
+// selecting the create response shape.
+func IsArkSeedanceTaskPath(path string) bool {
+	base := strings.TrimSuffix(arkSeedanceTaskPathPrefix, "/")
+	return path == base || strings.HasPrefix(path, arkSeedanceTaskPathPrefix)
+}
+
+// buildArkSeedanceTaskResponse projects the persisted task into the Volcano
+// Ark Seedance status shape. The upstream content URLs are short-lived; only
+// gateway artifact capability URLs are returned to callers.
+func buildArkSeedanceTaskResponse(task *model.Task) ([]byte, *dto.TaskError) {
+	if task == nil {
+		return nil, service.TaskErrorWrapperLocal(errors.New("task is required"), "task_not_exist", http.StatusBadRequest)
+	}
+	var upstream map[string]any
+	if len(task.Data) > 0 {
+		if err := common.Unmarshal(task.Data, &upstream); err != nil {
+			return nil, service.TaskErrorWrapper(err, "task_data_invalid", http.StatusInternalServerError)
+		}
+	}
+	if upstream == nil {
+		upstream = make(map[string]any)
+	}
+
+	modelName, _ := upstream["model"].(string)
+	if strings.TrimSpace(modelName) == "" {
+		modelName = task.Properties.OriginModelName
+	}
+	if strings.TrimSpace(modelName) == "" {
+		modelName = task.Properties.UpstreamModelName
+	}
+
+	status := arkSeedanceStatus(task, upstream)
+	createdAt := numericTaskField(upstream["created_at"], task.CreatedAt)
+	if createdAt == 0 {
+		createdAt = task.SubmitTime
+	}
+	updatedAt := numericTaskField(upstream["updated_at"], task.UpdatedAt)
+	if updatedAt == 0 {
+		updatedAt = createdAt
+	}
+	response := map[string]any{
+		"id":         task.TaskID,
+		"model":      modelName,
+		"status":     status,
+		"created_at": createdAt,
+		"updated_at": updatedAt,
+	}
+	// Preserve the provider's documented result metadata while keeping the
+	// gateway-owned id/status/timestamps authoritative.  This gives Volcano
+	// SDK clients the same fields they receive from Ark without exposing task
+	// internals such as channel ids or private credentials.
+	for _, key := range []string{
+		"seed",
+		"resolution",
+		"ratio",
+		"duration",
+		"framespersecond",
+		"service_tier",
+		"execution_expires_after",
+		"generate_audio",
+		"draft",
+		"priority",
+		"output_format",
+	} {
+		if value, ok := upstream[key]; ok {
+			response[key] = value
+		}
+	}
+
+	if rawUsage, ok := upstream["usage"].(map[string]any); ok && len(rawUsage) > 0 {
+		response["usage"] = rawUsage
+	}
+	if rawError, ok := upstream["error"].(map[string]any); ok && len(rawError) > 0 {
+		response["error"] = rawError
+	} else if status == "failed" || status == "expired" || status == "cancelled" {
+		message := strings.TrimSpace(task.FailReason)
+		if message == "" {
+			message = status
+		}
+		response["error"] = map[string]any{"code": "task_failed", "message": message}
+	}
+
+	if rawContent, ok := upstream["content"].(map[string]any); ok && len(rawContent) > 0 {
+		content := make(map[string]any, len(rawContent))
+		for key, value := range rawContent {
+			switch key {
+			case "video_url", "last_frame_url":
+				// Temporary provider URLs are replaced below.
+			default:
+				content[key] = value
+			}
+		}
+		artifactURLs, artifactErr := arkSeedanceArtifactURLs(task)
+		if artifactErr != nil {
+			return nil, service.TaskErrorWrapper(artifactErr, "artifact_proxy_unavailable", http.StatusInternalServerError)
+		}
+		if url := artifactURLs["video"]; url != "" {
+			content["video_url"] = url
+		}
+		if url := artifactURLs["last_frame"]; url != "" {
+			content["last_frame_url"] = url
+		}
+		if len(content) > 0 {
+			response["content"] = content
+		}
+	}
+
+	body, err := common.Marshal(response)
+	if err != nil {
+		return nil, service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+	}
+	return body, nil
+}
+
+func arkSeedanceArtifactURLs(task *model.Task) (map[string]string, error) {
+	urls := make(map[string]string)
+	if task == nil || task.Status != model.TaskStatusSuccess {
+		return urls, nil
+	}
+	adaptor := GetTaskAdaptor(task.Platform)
+	provider, ok := adaptor.(channel.TaskArtifactProvider)
+	if !ok {
+		return urls, nil
+	}
+	artifacts, err := provider.ListArtifacts(task)
+	if err != nil {
+		return nil, err
+	}
+	for _, artifact := range artifacts {
+		contentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		urls[artifact.Key] = contentURL
+	}
+	return urls, nil
+}
+
+func arkSeedanceStatus(task *model.Task, upstream map[string]any) string {
+	if raw, ok := upstream["status"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "queued", "running", "succeeded", "failed", "expired", "cancelled":
+			return strings.ToLower(strings.TrimSpace(raw))
+		}
+	}
+	switch task.Status {
+	case model.TaskStatusSuccess:
+		return "succeeded"
+	case model.TaskStatusFailure:
+		return "failed"
+	case model.TaskStatusInProgress:
+		return "running"
+	default:
+		return "queued"
+	}
+}
+
+func numericTaskField(value any, fallback int64) int64 {
+	switch typed := value.(type) {
+	case float64:
+		return int64(typed)
+	case float32:
+		return int64(typed)
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。

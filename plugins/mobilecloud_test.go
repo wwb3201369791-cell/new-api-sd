@@ -63,6 +63,128 @@ func TestMobileCloudPluginBuildsNativeRequest(t *testing.T) {
 	assert.Equal(t, "text", content[1].(map[string]any)["type"])
 }
 
+func TestMobileCloudPluginForwardsSeedanceProviderFields(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+		"baseUrl":       "https://mobilecloud.example",
+		"apiKey":        "MAAS_KEY",
+		"upstreamModel": "doubao-seedance-2.0",
+		"requestBody": map[string]any{
+			"model":      "doubao-seedance-2.0",
+			"content":    []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+			"duration":   -1,
+			"resolution": "1080p",
+			"seed":       42,
+			"draft":      true,
+		},
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	body, ok := request["body"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(-1), body["duration"])
+	assert.Equal(t, float64(42), body["seed"])
+	assert.Equal(t, true, body["draft"])
+	_, hasSeconds := body["seconds"]
+	assert.False(t, hasSeconds)
+}
+
+func TestMobileCloudPluginRejectsMalformedSeedanceContent(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+		"path":  "/api/v3/contents/generations/tasks",
+		"model": "doubao-seedance-2.0",
+		"body": map[string]any{"kind": "json", "value": map[string]any{
+			"model":   "doubao-seedance-2.0",
+			"content": []any{map[string]any{"type": "image_url", "image_url": map[string]any{}}},
+		}},
+	})
+	require.Error(t, err)
+}
+
+func TestMobileCloudPluginRejectsOutOfRangeDuration(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+		"path":  "/api/v3/contents/generations/tasks",
+		"model": "doubao-seedance-2.0",
+		"body": map[string]any{"kind": "json", "value": map[string]any{
+			"model": "doubao-seedance-2.0", "duration": 3601,
+			"content": []any{map[string]any{"type": "text", "text": "hello"}},
+		}},
+	})
+	require.Error(t, err)
+}
+
+func TestMobileCloudPluginPreservesArkContentRequest(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+		"baseUrl":       "https://mobilecloud.example",
+		"apiKey":        "MAAS_KEY",
+		"upstreamModel": "doubao-seedance-2.0",
+		"requestBody": map[string]any{
+			"model": "doubao-seedance-2.0",
+			"content": []any{
+				map[string]any{"type": "text", "text": "a red kite over the sea"},
+				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://cdn.example/reference.png"}},
+			},
+			"duration":   5,
+			"resolution": "720p",
+		},
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	body, ok := request["body"].(map[string]any)
+	require.True(t, ok)
+	content, ok := body["content"].([]any)
+	require.True(t, ok)
+	require.Len(t, content, 2)
+	assert.Equal(t, "text", content[0].(map[string]any)["type"])
+	assert.Equal(t, "a red kite over the sea", content[0].(map[string]any)["text"])
+	assert.Equal(t, "image_url", content[1].(map[string]any)["type"])
+	assert.Equal(t, "720p", body["resolution"])
+}
+
+func TestMobileCloudPluginNormalizesVolcanoConcreteModelName(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+		"baseUrl":       "https://mobilecloud.example",
+		"apiKey":        "MAAS_KEY",
+		"upstreamModel": "doubao-seedance-2-0-260128",
+		"requestBody": map[string]any{
+			"model":   "doubao-seedance-2-0-260128",
+			"content": []any{map[string]any{"type": "text", "text": "a mountain"}},
+		},
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	body, ok := request["body"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "doubao-seedance-2.0", body["model"])
+}
+
+func TestMobileCloudPluginValidatesArkProtocolContent(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+		"path":  "/api/v3/contents/generations/tasks",
+		"model": "doubao-seedance-2.0",
+		"body":  map[string]any{"kind": "json", "value": map[string]any{"model": "doubao-seedance-2.0"}},
+	})
+	require.Error(t, err)
+
+	value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+		"path":  "/api/v3/contents/generations/tasks",
+		"model": "doubao-seedance-2.0",
+		"body": map[string]any{"kind": "json", "value": map[string]any{
+			"model":   "doubao-seedance-2.0",
+			"content": []any{map[string]any{"type": "text", "text": "a red kite over the sea"}},
+		}},
+	})
+	require.NoError(t, err)
+	decoded := asJSONMap(t, value)
+	assert.Equal(t, "doubao-seedance-2.0", decoded["model"])
+	assert.Equal(t, "text_to_video", decoded["action"])
+}
+
 func TestMobileCloudPluginBuildsNonBillingChannelTestRequest(t *testing.T) {
 	plugin := loadMobileCloudPlugin(t)
 	value, err := plugin.Engine.Call(t.Context(), "buildChannelTestRequest", map[string]any{
@@ -81,6 +203,18 @@ func TestMobileCloudPluginBuildsNonBillingChannelTestRequest(t *testing.T) {
 	body, ok := request["body"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "doubao-seedance-2.0", body["model"])
+}
+
+func TestMobileCloudPluginNormalizesBaseURLAndEscapesTaskID(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildQueryRequest", map[string]any{
+		"baseUrl": "https://mobilecloud.example///",
+		"apiKey":  "MAAS_KEY",
+		"taskId":  "task/with-space",
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	assert.Equal(t, "https://mobilecloud.example/api/v3/contents/generations/tasks/task%2Fwith-space", request["url"])
 }
 
 func TestMobileCloudPluginParsesTaskLifecycle(t *testing.T) {

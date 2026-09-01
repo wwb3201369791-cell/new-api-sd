@@ -348,6 +348,31 @@ export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit"}} expo
 	assert.Contains(t, taskErr.Message, "must not return renderer")
 }
 
+func TestTaskAdaptorPreservesStructuredUpstreamSubmitErrors(t *testing.T) {
+	source := `
+export const meta = {apiVersion:1,key:"error-preserve",name:"Error Preserve",version:"1.0.0",author:{name:"Test"},models:["model"],fetchMode:"per_task"};
+export function buildSubmitRequest(){ return {url:"https://provider.example/submit"}; }
+export function parseSubmitResponse(){ throw new Error("hook should not run"); }
+export function buildQueryRequest(){ return {url:"https://provider.example/query"}; }
+export function parseTaskResult(){ return {status:"SUCCESS"}; }
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(`{"ErrorCode":"InvalidParameter","ErrorMessage":"duration is invalid"}`)),
+		Header:     make(http.Header),
+	}
+	_, taskErr := adaptor.ParseResponse(c, resp, &relaycommon.RelayInfo{})
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	assert.Equal(t, "InvalidParameter", taskErr.Code)
+	assert.Equal(t, "duration is invalid", taskErr.Message)
+}
+
 func TestTaskAdaptorBuildContentRequestHookAndMissingFallback(t *testing.T) {
 	source := strings.Replace(mockPlugin, `export function listArtifacts() { return []; }
 export function buildContentRequest() { throw new Error("artifact_not_found"); }`, `export function listArtifacts(task) { return [{key: "video", type: "video", mimeType: "video/mp4"}]; }

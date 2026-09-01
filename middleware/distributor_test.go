@@ -2,16 +2,50 @@ package middleware
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetModelRequestRecognizesArkSeedanceTaskPaths(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			body := ""
+			if method == http.MethodPost {
+				body = `{"model":"doubao-seedance-2.0","content":[{"type":"text","text":"hello"}]}`
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(method, "/api/v3/contents/generations/tasks", strings.NewReader(body))
+			if method == http.MethodPost {
+				c.Request.Header.Set("Content-Type", "application/json")
+			}
+			request, selectChannel, err := getModelRequest(c)
+			require.NoError(t, err)
+			require.NotNil(t, request)
+			assert.Equal(t, method == http.MethodPost, selectChannel)
+			if method == http.MethodPost {
+				assert.Equal(t, "doubao-seedance-2.0", request.Model)
+			} else {
+				assert.Empty(t, request.Model)
+			}
+			if method == http.MethodPost {
+				assert.Equal(t, relayconstant.RelayModeVideoSubmit, c.GetInt("relay_mode"))
+			} else {
+				assert.Equal(t, relayconstant.RelayModeVideoFetchByID, c.GetInt("relay_mode"))
+			}
+		})
+	}
+}
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin}

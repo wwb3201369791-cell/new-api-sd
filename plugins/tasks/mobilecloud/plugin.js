@@ -7,7 +7,7 @@ export const meta = {
     en: "China Mobile Cloud Seedance video generation (text-to-video, image-to-video, and multimodal input)",
     zh: "移动云 Seedance 视频生成（文生视频、图生视频和多模态输入）",
   },
-  version: "1.0.2",
+  version: "1.0.3",
   author: { name: "QuantumNous" },
   // Third-party task plugin channels are bound by task_plugin_key. Keep the
   // public alias documented by Mobile Cloud; channel model_mapping can map it
@@ -57,6 +57,11 @@ export const meta = {
 
 function trimmed(value) {
   return String(value || "").trim();
+}
+
+function normalizeMobileModel(value) {
+  const model = trimmed(value);
+  return model === "doubao-seedance-2-0-260128" ? "doubao-seedance-2.0" : model;
 }
 
 function draftTaskIds(content) {
@@ -115,6 +120,34 @@ function contentFromRequest(req) {
   if (Array.isArray(metadata.content)) content.push(...metadata.content);
   if (Array.isArray(req && req.content)) content.push(...req.content);
   return content;
+}
+
+function validateSeedanceContent(content) {
+  if (!Array.isArray(content)) throw new Error("content must be an array");
+  if (content.length === 0 || content.length > 5) throw new Error("content must contain between 1 and 5 items");
+  for (const item of content) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("content items must be objects");
+    const type = trimmed(item.type);
+    if (!type) throw new Error("content item type is required");
+    if (type === "text") {
+      if (typeof item.text !== "string" || !trimmed(item.text)) throw new Error("text content requires a non-empty text field");
+      continue;
+    }
+    if (["image_url", "video_url", "audio_url"].includes(type)) {
+      const value = item[type];
+      const url = typeof value === "string" ? value : value && typeof value === "object" ? value.url : "";
+      if (!trimmed(url)) throw new Error(type + " content requires a public URL");
+    }
+  }
+  return content;
+}
+
+function validateSeedanceDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isInteger(seconds) || (seconds !== -1 && (seconds <= 0 || seconds > 3600))) {
+    throw new Error("duration must be -1 or an integer between 1 and 3600");
+  }
+  return seconds;
 }
 
 // Max-pixel 16:9 dimensions per resolution tier. Used when ratio is absent or
@@ -197,6 +230,7 @@ export const native = {
     if (!model) throw new Error("model is required");
     if (body.content !== undefined && !Array.isArray(body.content)) throw new Error("content must be an array");
     const content = Array.isArray(body.content) ? body.content : [];
+    validateSeedanceContent(content);
     const texts = [];
     let hasReference = false;
     for (const item of content) {
@@ -214,8 +248,7 @@ export const native = {
         .join("\n"),
       metadata: body,
     };
-    const seconds = Number(body.duration);
-    if (Number.isFinite(seconds) && seconds > 0) requestBody.seconds = seconds;
+    if (Object.prototype.hasOwnProperty.call(body, "duration")) requestBody.seconds = validateSeedanceDuration(body.duration);
     const intent = { kind: "submit", model: model, action: hasReference ? "image_to_video" : "text_to_video", requestBody: requestBody };
     const originTaskIds = draftTaskIds(content);
     if (originTaskIds.length) intent.originTaskIds = originTaskIds;
@@ -239,8 +272,35 @@ export const native = {
 
 export function buildSubmitRequest(ctx) {
   const req = ctx.requestBody;
+  const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
+  if (!baseUrl) throw new Error("baseUrl is required");
   const metadata = req.metadata && typeof req.metadata === "object" && !Array.isArray(req.metadata) ? req.metadata : {};
-  const body = Object.assign({ model: req.model || "", content: [] }, metadata);
+  // Responses requests are normalized into prompt/images/metadata, while the
+  // Ark-compatible endpoint sends the provider's content[] shape directly.
+  // Preserve both forms instead of dropping a direct content array.
+  const body = Object.assign({}, metadata);
+  for (const key of [
+    "content",
+    "duration",
+    "ratio",
+    "resolution",
+    "watermark",
+    "generate_audio",
+    "return_last_frame",
+    "seed",
+    "camera_fixed",
+    "frames",
+    "tools",
+    "safety_identifier",
+    "service_tier",
+    "execution_expires_after",
+    "draft",
+    "priority",
+    "output_format",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(req, key)) body[key] = req[key];
+  }
+  body.model = req.model || "";
   const imageContent = [];
   const images = [];
   if (Array.isArray(req.images)) images.push(...req.images);
@@ -250,23 +310,34 @@ export function buildSubmitRequest(ctx) {
   for (const url of images) {
     if (typeof url === "string" && trimmed(url)) imageContent.push({ type: "image_url", image_url: { url: trimmed(url) }, role: "reference_image" });
   }
+  const directContent = Array.isArray(req.content) ? req.content.slice() : null;
   const metadataContent = contentFromRequest(req);
   const hasPrompt = trimmed(req.prompt) !== "";
-  body.content = imageContent.concat(metadataContent).filter(function (item) {
-    return item && (!hasPrompt || item.type !== "text");
-  });
-  const hasReference = body.content.some((item) => item && item.type !== "text");
-  if (hasPrompt || (!hasReference && body.content.length === 0)) body.content.push({ type: "text", text: req.prompt || "" });
-  if (Array.isArray(body.content)) body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
-  for (const key of ["generate_audio", "ratio", "watermark", "service_tier", "draft", "priority", "output_format"]) {
-    if (Object.prototype.hasOwnProperty.call(req, key)) body[key] = req[key];
+  if (directContent) {
+    body.content = directContent;
+    // Add normalized image fields only when the direct content did not carry
+    // the same URL already. This keeps the official content order intact.
+    for (const item of imageContent) {
+      const imageURL = item.image_url && item.image_url.url;
+      const exists = body.content.some((candidate) => candidate && candidate.image_url && candidate.image_url.url === imageURL);
+      if (!exists) body.content.push(item);
+    }
+  } else {
+    body.content = imageContent.concat(metadataContent).filter(function (item) {
+      return item && (!hasPrompt || item.type !== "text");
+    });
+    const hasReference = body.content.some((item) => item && item.type !== "text");
+    if (hasPrompt || (!hasReference && body.content.length === 0)) body.content.push({ type: "text", text: req.prompt || "" });
   }
+  const hasReference = body.content.some((item) => item && item.type !== "text");
+  validateSeedanceContent(body.content);
+  if (Array.isArray(body.content)) body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
+  delete body.seconds;
   const secondsValue = req.seconds === undefined ? req.duration : req.seconds;
-  const seconds = Number.parseInt(secondsValue === undefined ? "" : secondsValue, 10);
-  if (seconds > 0) body.duration = seconds;
-  body.model = ctx.upstreamModel || body.model;
+  if (secondsValue !== undefined) body.duration = validateSeedanceDuration(secondsValue);
+  body.model = normalizeMobileModel(ctx.upstreamModel || body.model);
   return {
-    url: ctx.baseUrl + "/api/v3/contents/generations/tasks",
+    url: baseUrl + "/api/v3/contents/generations/tasks",
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + ctx.apiKey },
     body: body,
@@ -281,7 +352,7 @@ export function buildSubmitRequest(ctx) {
 // from buildSubmitRequest (which is billable).
 export function buildChannelTestRequest(ctx) {
   const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
-  const model = trimmed(ctx && (ctx.upstreamModel || ctx.model));
+  const model = normalizeMobileModel(ctx && (ctx.upstreamModel || ctx.model));
   if (!baseUrl) throw new Error("baseUrl is required");
   if (!model) throw new Error("model is required");
   return {
@@ -324,8 +395,12 @@ export function extractUsage(ctx) {
 }
 
 export function buildQueryRequest(ctx) {
+  const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
+  if (!baseUrl) throw new Error("baseUrl is required");
+  const taskId = trimmed(ctx && ctx.taskId);
+  if (!taskId) throw new Error("taskId is required");
   return {
-    url: ctx.baseUrl + "/api/v3/contents/generations/tasks/" + ctx.taskId,
+    url: baseUrl + "/api/v3/contents/generations/tasks/" + encodeURIComponent(taskId),
     method: "GET",
     headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + ctx.apiKey },
   };
@@ -413,8 +488,8 @@ export const protocols = {
       else if (req.size && !metadata.resolution) metadata.resolution = normalizeResolution(req.size);
       const requestBody = { model: model, prompt: prompt, metadata: metadata };
       if (images.length) requestBody.images = images;
-      if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = req.seconds;
-      else if (Object.prototype.hasOwnProperty.call(req, "duration")) requestBody.seconds = req.duration;
+      if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = validateSeedanceDuration(req.seconds);
+      else if (Object.prototype.hasOwnProperty.call(req, "duration")) requestBody.seconds = validateSeedanceDuration(req.duration);
       if (Object.prototype.hasOwnProperty.call(req, "size")) requestBody.size = req.size;
       for (const key of ["generate_audio", "ratio", "watermark"]) {
         if (Object.prototype.hasOwnProperty.call(req, key)) requestBody[key] = req[key];
@@ -481,13 +556,18 @@ protocols.openai_video = {
     if (ctx.body.kind === "json") {
       if (!ctx.body.value || Array.isArray(ctx.body.value)) throw new Error("JSON object required");
       const req = ctx.body.value;
+      const isArkPath = String(ctx.path || "").startsWith("/api/v3/contents/generations/tasks");
+      if (isArkPath && (!Array.isArray(req.content) || req.content.length === 0)) throw new Error("content must be a non-empty array");
+      if (Array.isArray(req.content) && req.content.length > 5) throw new Error("content must contain at most 5 items");
+      if (isArkPath) validateSeedanceContent(req.content);
       const seconds = req.seconds === undefined ? req.duration : req.seconds;
-      if (seconds !== undefined && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
-        throw new Error("seconds must be between 1 and 3600");
+      if (seconds !== undefined) validateSeedanceDuration(seconds);
+      const content = Array.isArray(req.content) ? req.content : [];
+      const hasReference = content.some((item) => item && typeof item === "object" && item.type !== "text") || req.input_reference || req.image;
       return {
         kind: "submit",
         model: ctx.model,
-        action: req.input_reference || req.image ? "image_to_video" : "text_to_video",
+        action: hasReference ? "image_to_video" : "text_to_video",
         requestBody: Object.assign({}, req, { model: ctx.model }),
       };
     }
@@ -515,8 +595,7 @@ protocols.openai_video = {
     if (req.seconds !== undefined) req.seconds = Number(req.seconds);
     else if (req.duration !== undefined) req.seconds = Number(req.duration);
     const seconds = req.seconds === undefined ? req.duration : req.seconds;
-    if (seconds !== undefined && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
-      throw new Error("seconds must be between 1 and 3600");
+    if (seconds !== undefined) req.seconds = validateSeedanceDuration(seconds);
     return {
       kind: "submit",
       model: ctx.model,

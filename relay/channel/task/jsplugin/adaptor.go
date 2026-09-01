@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -22,12 +23,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
@@ -445,6 +446,15 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	if common.Unmarshal(body, &decoded) == nil {
 		responseBody = decoded
 	}
+	// Provider task APIs return a stable error envelope on non-2xx responses.
+	// Surface that envelope before invoking parseSubmitResponse so host
+	// protocol presenters can preserve the provider code/message instead of
+	// reporting the secondary "task_id is empty" hook error.
+	if resp.StatusCode >= http.StatusBadRequest {
+		if taskErr := parseUpstreamTaskError(resp.StatusCode, responseBody); taskErr != nil {
+			return nil, taskErr
+		}
+	}
 	headers := make(map[string][]string, len(resp.Header))
 	maps.Copy(headers, resp.Header)
 	value, err := a.plugin.Engine.Call(c.Request.Context(), "parseSubmitResponse", a.submitContext(c, info), map[string]any{"statusCode": resp.StatusCode, "headers": headers, "body": responseBody})
@@ -502,6 +512,52 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		TaskData:       taskData,
 		Immediate:      immediate,
 	}, nil
+}
+
+func parseUpstreamTaskError(statusCode int, body any) *dto.TaskError {
+	root, ok := body.(map[string]any)
+	if !ok {
+		return nil
+	}
+	value := root
+	if nested, ok := root["error"].(map[string]any); ok {
+		value = nested
+	}
+	code := upstreamErrorString(value["code"])
+	message := upstreamErrorString(value["message"])
+	if code == "" {
+		code = upstreamErrorString(root["ErrorCode"])
+	}
+	if message == "" {
+		message = upstreamErrorString(root["ErrorMessage"])
+	}
+	if code == "" && message == "" {
+		return nil
+	}
+	if code == "" {
+		code = fmt.Sprintf("upstream_http_%d", statusCode)
+	}
+	if message == "" {
+		message = http.StatusText(statusCode)
+	}
+	return service.TaskErrorWrapper(errors.New(message), code, statusCode)
+}
+
+func upstreamErrorString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	default:
+		return ""
+	}
 }
 
 func (a *TaskAdaptor) GetModelList() []string { return append([]string(nil), a.plugin.Meta.Models...) }
