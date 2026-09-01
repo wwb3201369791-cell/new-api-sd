@@ -7,7 +7,7 @@ export const meta = {
     en: "China Mobile Cloud Seedance video generation (text-to-video, image-to-video, and multimodal input)",
     zh: "移动云 Seedance 视频生成（文生视频、图生视频和多模态输入）",
   },
-  version: "1.0.0",
+  version: "1.0.2",
   author: { name: "QuantumNous" },
   // Third-party task plugin channels are bound by task_plugin_key. Keep the
   // public alias documented by Mobile Cloud; channel model_mapping can map it
@@ -370,7 +370,10 @@ export function buildContentRequest(ctx) {
   const urls = { video: content.video_url, last_frame: content.last_frame_url };
   const url = trimmed(urls[ctx.artifactKey]);
   if (!url) throw new Error("artifact_not_found");
-  return { url: url, method: ctx.clientRequest.method, credentialless: true };
+  // Mobile Cloud's CDN serves media with GET but does not implement HEAD.
+  // The host still suppresses the response body for an incoming HEAD request,
+  // so always use GET upstream while preserving OpenAI HEAD semantics.
+  return { url: url, method: "GET", credentialless: true };
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {

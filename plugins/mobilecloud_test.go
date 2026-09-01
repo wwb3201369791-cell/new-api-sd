@@ -138,3 +138,19 @@ func TestMobileCloudPluginUsesCompletionUsageOnSuccess(t *testing.T) {
 	assert.Equal(t, float64(9876), facts["tokens"])
 	assert.Equal(t, "720p", facts["resolution"])
 }
+
+func TestMobileCloudPluginFetchesArtifactsWithGet(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{
+		"artifactKey":   "video",
+		"clientRequest": map[string]any{"method": "HEAD"},
+		"data": map[string]any{
+			"content": map[string]any{"video_url": "https://cdn.example/result.mp4"},
+		},
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	assert.Equal(t, "https://cdn.example/result.mp4", request["url"])
+	assert.Equal(t, "GET", request["method"])
+	assert.Equal(t, true, request["credentialless"])
+}
