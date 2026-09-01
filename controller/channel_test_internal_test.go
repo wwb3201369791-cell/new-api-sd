@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -22,6 +24,83 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTaskPluginChannelTestUsesNonBillingHook(t *testing.T) {
+	var gotAuth string
+	var gotModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		var body struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, common.DecodeJson(r.Body, &body))
+		gotModel = body.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"endpoint":"ep-test"}`))
+	}))
+	defer upstream.Close()
+
+	const pluginKey = "channel-test-preflight"
+	source := `
+export const meta = { apiVersion: 1, key: "channel-test-preflight", name: "Channel Test Preflight", version: "1.0.0", author: {name: "Test"}, models: ["fixture-model"], fetchMode: "per_task" };
+export function buildSubmitRequest() { return {url: "https://example.com/submit"}; }
+export function parseSubmitResponse() { return {taskId: "task"}; }
+export function buildQueryRequest() { return {url: "https://example.com/query"}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+export function buildChannelTestRequest(ctx) {
+  return {url: ctx.baseUrl + "/probe", method: "POST", headers: {"Authorization": "Bearer " + ctx.apiKey, "Content-Type": "application/json"}, body: {model: ctx.model}};
+}
+`
+	_, err := pluginruntime.DefaultRegistry.Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pluginruntime.DefaultRegistry.Unregister(pluginKey) })
+
+	setting := `{"task_plugin_key":"` + pluginKey + `"}`
+	channel := &model.Channel{
+		Id:      101,
+		Type:    constant.ChannelTypeTaskPlugin,
+		Name:    "preflight",
+		Key:     "fixture-key",
+		Models:  "fixture-model",
+		BaseURL: common.GetPointer(upstream.URL),
+		Setting: common.GetPointer(setting),
+	}
+
+	result := testTaskPluginChannel(context.Background(), channel, 7, "fixture-model")
+	require.NoError(t, result.localErr)
+	assert.Nil(t, result.newAPIError)
+	assert.Equal(t, "Bearer fixture-key", gotAuth)
+	assert.Equal(t, "fixture-model", gotModel)
+}
+
+func TestTaskPluginChannelTestRejectsMissingPreflightHook(t *testing.T) {
+	const pluginKey = "channel-test-no-hook"
+	source := `
+export const meta = { apiVersion: 1, key: "channel-test-no-hook", name: "Channel Test No Hook", version: "1.0.0", author: {name: "Test"}, models: ["fixture-model"], fetchMode: "per_task" };
+export function buildSubmitRequest() { return {url: "https://example.com/submit"}; }
+export function parseSubmitResponse() { return {taskId: "task"}; }
+export function buildQueryRequest() { return {url: "https://example.com/query"}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+`
+	_, err := pluginruntime.DefaultRegistry.Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pluginruntime.DefaultRegistry.Unregister(pluginKey) })
+
+	setting := `{"task_plugin_key":"` + pluginKey + `"}`
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeTaskPlugin,
+		Name:    "missing-hook",
+		Key:     "fixture-key",
+		Models:  "fixture-model",
+		BaseURL: common.GetPointer("https://example.com"),
+		Setting: common.GetPointer(setting),
+	}
+
+	result := testTaskPluginChannel(context.Background(), channel, 7, "fixture-model")
+	require.Error(t, result.localErr)
+	assert.True(t, strings.Contains(result.localErr.Error(), "buildChannelTestRequest"))
+	assert.NotNil(t, result.newAPIError)
+}
 
 func TestValidateChannelProxy(t *testing.T) {
 	tests := []struct {

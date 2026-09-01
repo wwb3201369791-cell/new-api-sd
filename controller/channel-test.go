@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -39,6 +40,177 @@ type testResult struct {
 	context     *gin.Context
 	localErr    error
 	newAPIError *types.NewAPIError
+}
+
+// taskPluginChannelTestRequest is the intentionally small request contract
+// used by the optional buildChannelTestRequest plugin hook.  Channel tests
+// must validate credentials and routing without submitting a billable task.
+type taskPluginChannelTestRequest struct {
+	URL     string            `json:"url"`
+	Method  string            `json:"method"`
+	Headers map[string]string `json:"headers"`
+	Body    any               `json:"body"`
+}
+
+// testTaskPluginChannel executes a plugin-provided, non-billing preflight
+// request.  Unlike the normal relay path it never calls buildSubmitRequest,
+// so clicking “测试渠道” cannot create a video task or consume provider quota.
+func testTaskPluginChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string) testResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if channel == nil {
+		return testResult{localErr: errors.New("channel is nil"), newAPIError: types.NewOpenAIError(errors.New("channel is nil"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)}
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/channel/test", nil)
+	c.Set("id", testUserID)
+	c.Set("channel_id", channel.Id)
+	c.Set("channel_name", channel.Name)
+	c.Set("channel_type", channel.Type)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
+
+	failure := func(err error, code types.ErrorCode, status int) testResult {
+		if err == nil {
+			err = errors.New("task plugin channel preflight failed")
+		}
+		if status < 100 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		return testResult{
+			context:     c,
+			localErr:    err,
+			newAPIError: types.NewOpenAIError(err, code, status),
+		}
+	}
+	setting := channel.GetSetting()
+	apiKey, _, keyErr := channel.GetNextEnabledKey()
+	if keyErr != nil {
+		return failure(keyErr, types.ErrorCodeChannelNoAvailableKey, http.StatusBadRequest)
+	}
+	common.SetContextKey(c, constant.ContextKeyChannelKey, apiKey)
+	pluginKey := strings.TrimSpace(setting.TaskPluginKey)
+	if pluginKey == "" {
+		return failure(errors.New("task plugin key is empty"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+	}
+	plugin, ok := pluginruntime.DefaultRegistry.Get(pluginKey)
+	if !ok || plugin == nil {
+		return failure(fmt.Errorf("task plugin %q is not registered", pluginKey), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+	}
+	hasHook, err := plugin.Engine.HasCallablePath(ctx, "buildChannelTestRequest")
+	if err != nil {
+		return failure(fmt.Errorf("inspect task plugin preflight hook: %w", err), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+	}
+	if !hasHook {
+		return failure(fmt.Errorf("task plugin %q does not implement buildChannelTestRequest", pluginKey), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+	}
+
+	testModel = strings.TrimSpace(testModel)
+	if testModel == "" {
+		if channel.TestModel != nil {
+			testModel = strings.TrimSpace(*channel.TestModel)
+		}
+		if testModel == "" {
+			models := channel.GetModels()
+			if len(models) > 0 {
+				testModel = strings.TrimSpace(models[0])
+			}
+		}
+	}
+	if testModel == "" {
+		return failure(errors.New("task plugin channel has no test model"), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
+	hookContext := map[string]any{
+		"model":         testModel,
+		"upstreamModel": testModel,
+		"baseUrl":       baseURL,
+		"apiKey":        apiKey,
+		"action":        "channel_test",
+		"requestBody":   map[string]any{"model": testModel},
+		"requestHeaders": map[string]string{
+			"Content-Type": "application/json",
+			"Accept":       "application/json",
+		},
+		"channelSetting": map[string]any{
+			"proxy": setting.Proxy,
+		},
+	}
+	value, err := plugin.Engine.Call(ctx, "buildChannelTestRequest", hookContext)
+	if err != nil {
+		return failure(fmt.Errorf("task plugin preflight hook failed: %w", err), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+	}
+	encodedDescriptor, err := common.Marshal(value)
+	if err != nil {
+		return failure(fmt.Errorf("marshal task plugin preflight request: %w", err), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+	}
+	var descriptor taskPluginChannelTestRequest
+	if err = common.Unmarshal(encodedDescriptor, &descriptor); err != nil {
+		return failure(fmt.Errorf("decode task plugin preflight request: %w", err), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+	}
+	if strings.TrimSpace(descriptor.URL) == "" {
+		return failure(errors.New("task plugin preflight request URL is empty"), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+	}
+	if err = pluginruntime.ValidateRequestURL(descriptor.URL, channel.GetBaseURL(), plugin.Meta.AllowedHosts); err != nil {
+		return failure(fmt.Errorf("task plugin preflight URL is not allowed: %w", err), types.ErrorCodeInvalidRequest, http.StatusBadRequest)
+	}
+
+	var body io.Reader
+	if descriptor.Body != nil {
+		if text, ok := descriptor.Body.(string); ok {
+			body = strings.NewReader(text)
+		} else {
+			bodyBytes, marshalErr := common.Marshal(descriptor.Body)
+			if marshalErr != nil {
+				return failure(fmt.Errorf("marshal task plugin preflight body: %w", marshalErr), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+			}
+			body = bytes.NewReader(bodyBytes)
+		}
+	}
+	method := strings.ToUpper(strings.TrimSpace(descriptor.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+	req, err := http.NewRequestWithContext(ctx, method, descriptor.URL, body)
+	if err != nil {
+		return failure(fmt.Errorf("create task plugin preflight request: %w", err), types.ErrorCodeConvertRequestFailed, http.StatusBadGateway)
+	}
+	for name, headerValue := range descriptor.Headers {
+		req.Header.Set(name, headerValue)
+	}
+	if descriptor.Body != nil && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	client, err := service.GetHttpClientWithProxySettings(setting.Proxy, setting)
+	if err != nil {
+		return failure(fmt.Errorf("create task plugin preflight HTTP client: %w", err), types.ErrorCodeDoRequestFailed, http.StatusBadGateway)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return failure(fmt.Errorf("task plugin preflight request failed: %w", err), types.ErrorCodeDoRequestFailed, http.StatusBadGateway)
+	}
+	defer service.CloseResponseBodyGracefully(resp)
+	const maxPreflightResponseBytes = 64 << 10
+	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxPreflightResponseBytes+1))
+	if readErr != nil {
+		return failure(fmt.Errorf("read task plugin preflight response: %w", readErr), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+	}
+	if len(responseBody) > maxPreflightResponseBytes {
+		responseBody = responseBody[:maxPreflightResponseBytes]
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		requestErr := fmt.Errorf("task plugin preflight returned HTTP %d", resp.StatusCode)
+		if message := detectErrorMessageFromJSONBytes(responseBody); message != "" {
+			requestErr = fmt.Errorf("%w: %s", requestErr, message)
+		}
+		return failure(requestErr, types.ErrorCodeBadResponse, resp.StatusCode)
+	}
+	if message := detectErrorMessageFromJSONBytes(responseBody); message != "" {
+		return failure(fmt.Errorf("task plugin preflight returned error: %s", message), types.ErrorCodeBadResponse, http.StatusBadGateway)
+	}
+	return testResult{context: c}
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
@@ -73,6 +245,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if channel != nil && channel.Type == constant.ChannelTypeTaskPlugin {
+		return testTaskPluginChannel(ctx, channel, testUserID, testModel)
+	}
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -82,7 +257,6 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		constant.ChannelTypeJimeng,
 		constant.ChannelTypeDoubaoVideo,
 		constant.ChannelTypeVidu,
-		constant.ChannelTypeTaskPlugin,
 	}
 	if lo.Contains(unsupportedTestChannelTypes, channel.Type) {
 		channelTypeName := constant.GetChannelTypeName(channel.Type)
