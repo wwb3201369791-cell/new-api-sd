@@ -345,6 +345,8 @@ func migrateDB() error {
 		&TopUp{},
 		&QuotaData{},
 		&Task{},
+		&MobileCloudAssetGroup{},
+		&MobileCloudAsset{},
 		&TaskPlugin{},
 		&Model{},
 		&Vendor{},

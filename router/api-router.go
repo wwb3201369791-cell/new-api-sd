@@ -249,6 +249,25 @@ func SetApiRouter(router *gin.Engine) {
 			taskPluginRoute.POST("/:key/dryrun", controller.DryRunTaskPlugin)
 			taskPluginRoute.DELETE("/:key/versions/:version", controller.DeleteTaskPluginVersion)
 		}
+		// Mobile Cloud asset management. Credentials remain in the selected
+		// task-plugin channel; these user-authenticated routes expose only the
+		// provider's asset/group data and signed media URLs.
+		mobileCloudAssetRoute := apiRouter.Group("/mobilecloud")
+		mobileCloudAssetRoute.Use(middleware.UserAuth())
+		{
+			mobileCloudAssetRoute.GET("/asset-groups", controller.ListMobileCloudAssetGroups)
+			mobileCloudAssetRoute.POST("/asset-groups", controller.CreateMobileCloudAssetGroup)
+			mobileCloudAssetRoute.GET("/asset-groups/:group_id", controller.GetMobileCloudAssetGroup)
+			mobileCloudAssetRoute.PUT("/asset-groups/:group_id", controller.UpdateMobileCloudAssetGroup)
+			mobileCloudAssetRoute.DELETE("/asset-groups/:group_id", controller.DeleteMobileCloudAssetGroup)
+			mobileCloudAssetRoute.GET("/assets", controller.ListMobileCloudAssets)
+			mobileCloudAssetRoute.POST("/assets", controller.CreateMobileCloudAsset)
+			mobileCloudAssetRoute.GET("/assets/:asset_id", controller.GetMobileCloudAsset)
+			mobileCloudAssetRoute.PUT("/assets/:asset_id", controller.UpdateMobileCloudAsset)
+			mobileCloudAssetRoute.DELETE("/assets/:asset_id", controller.DeleteMobileCloudAsset)
+			mobileCloudAssetRoute.POST("/real-person-auth/sessions", controller.CreateMobileCloudRealPersonSession)
+			mobileCloudAssetRoute.POST("/real-person-auth/asset-group/by-byted-token", controller.GetMobileCloudAssetGroupByBytedToken)
+		}
 		apiRouter.GET("/task_plugin_options", middleware.AdminAuth(), middleware.RequirePermission(authz.TaskPluginBind), controller.GetTaskPluginOptions)
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)

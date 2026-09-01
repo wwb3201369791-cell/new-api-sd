@@ -116,6 +116,22 @@ type TaskContentRequestProvider interface {
 	BuildContentRequest(task *model.Task, artifactKey string, clientRequest TaskArtifactClientRequest) (*TaskContentRequest, error)
 }
 
+// TaskControlRequest describes a provider-side lifecycle operation such as
+// cancelling or deleting a task. It is deliberately optional so existing
+// task adaptors keep their current behaviour; providers that expose a
+// compatible control endpoint can implement it without adding provider logic
+// to the host controller.
+type TaskControlRequest struct {
+	URL     string
+	Method  string
+	Headers map[string]string
+	Body    []byte
+}
+
+type TaskControlRequestProvider interface {
+	BuildControlRequest(task *model.Task, action string) (*TaskControlRequest, error)
+}
+
 type TaskUsageFactsProvider interface {
 	ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any
 }

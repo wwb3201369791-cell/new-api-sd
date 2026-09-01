@@ -7,7 +7,7 @@ export const meta = {
     en: "China Mobile Cloud Seedance video generation (text-to-video, image-to-video, and multimodal input)",
     zh: "移动云 Seedance 视频生成（文生视频、图生视频和多模态输入）",
   },
-  version: "1.0.3",
+  version: "1.0.4",
   author: { name: "QuantumNous" },
   // Third-party task plugin channels are bound by task_plugin_key. Keep the
   // public alias documented by Mobile Cloud; channel model_mapping can map it
@@ -406,6 +406,23 @@ export function buildQueryRequest(ctx) {
   };
 }
 
+// Mobile Cloud uses one DELETE endpoint for both cancellation of queued tasks
+// and deletion of terminal tasks. The host decides which semantic action is
+// being requested, while this hook keeps provider URL/auth details here.
+export function buildControlRequest(ctx) {
+  const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
+  const taskId = trimmed(ctx && ctx.upstreamTaskId);
+  const apiKey = trimmed(ctx && ctx.apiKey);
+  if (!baseUrl) throw new Error("baseUrl is required");
+  if (!taskId) throw new Error("upstreamTaskId is required");
+  if (!apiKey) throw new Error("apiKey is required");
+  return {
+    url: baseUrl + "/api/v3/contents/generations/tasks/" + encodeURIComponent(taskId),
+    method: "DELETE",
+    headers: { Accept: "application/json", Authorization: "Bearer " + apiKey },
+  };
+}
+
 export function parseTaskResult(ctx, body) {
   if (body.status === "pending" || body.status === "queued") return { status: "QUEUED", progress: "10%" };
   if (body.status === "processing" || body.status === "running") return { status: "IN_PROGRESS", progress: "50%" };
@@ -545,7 +562,12 @@ const legacyRenderers = {
       created_at: task.created_at,
       completed_at: task.updated_at,
     };
-    if (data.status === "failed") output.error = { message: data.error ? data.error.message || "" : "", code: data.error ? data.error.code || "" : "" };
+    if (data.status === "failed" || data.status === "cancelled") {
+      output.error = {
+        message: data.error ? data.error.message || "" : data.status === "cancelled" ? "cancelled" : "",
+        code: data.error ? data.error.code || "" : data.status === "cancelled" ? "task_cancelled" : "",
+      };
+    }
     return output;
   },
 };

@@ -675,6 +675,13 @@ func buildArkSeedanceTaskResponse(task *model.Task) ([]byte, *dto.TaskError) {
 	return body, nil
 }
 
+// BuildArkSeedanceTaskResponse exposes the provider-compatible projection to
+// controllers that assemble collection responses without duplicating the
+// status/artifact mapping rules.
+func BuildArkSeedanceTaskResponse(task *model.Task) ([]byte, *dto.TaskError) {
+	return buildArkSeedanceTaskResponse(task)
+}
+
 func arkSeedanceArtifactURLs(task *model.Task) (map[string]string, error) {
 	urls := make(map[string]string)
 	if task == nil || task.Status != model.TaskStatusSuccess {

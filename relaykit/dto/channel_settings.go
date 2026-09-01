@@ -11,7 +11,14 @@ import (
 )
 
 type ChannelSettings struct {
-	TaskPluginKey          string `json:"task_plugin_key,omitempty"`
+	TaskPluginKey string `json:"task_plugin_key,omitempty"`
+	// Mobile Cloud asset OpenAPI credentials are kept separate from the task
+	// generation Bearer key (Channel.Key). They are optional and only used by
+	// the asset-management API.
+	AssetBaseURL           string `json:"asset_base_url,omitempty"`
+	AssetAccessKey         string `json:"asset_access_key,omitempty"`
+	AssetSecretKey         string `json:"asset_secret_key,omitempty"`
+	AssetResourcePool      string `json:"asset_resource_pool,omitempty"`
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
 	Proxy                  string `json:"proxy"`

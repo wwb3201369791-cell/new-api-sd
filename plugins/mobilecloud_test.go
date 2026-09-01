@@ -217,6 +217,23 @@ func TestMobileCloudPluginNormalizesBaseURLAndEscapesTaskID(t *testing.T) {
 	assert.Equal(t, "https://mobilecloud.example/api/v3/contents/generations/tasks/task%2Fwith-space", request["url"])
 }
 
+func TestMobileCloudPluginBuildsControlRequest(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildControlRequest", map[string]any{
+		"baseUrl":        "https://mobilecloud.example///",
+		"apiKey":         "MAAS_KEY",
+		"upstreamTaskId": "task/with-space",
+		"action":         "cancel",
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	assert.Equal(t, "https://mobilecloud.example/api/v3/contents/generations/tasks/task%2Fwith-space", request["url"])
+	assert.Equal(t, "DELETE", request["method"])
+	headerMap, ok := request["headers"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Bearer MAAS_KEY", headerMap["Authorization"])
+}
+
 func TestMobileCloudPluginParsesTaskLifecycle(t *testing.T) {
 	plugin := loadMobileCloudPlugin(t)
 	created, err := plugin.Engine.Call(t.Context(), "parseSubmitResponse", map[string]any{}, map[string]any{

@@ -933,6 +933,66 @@ func (a *TaskAdaptor) BuildContentRequest(task *model.Task, artifactKey string, 
 	}, nil
 }
 
+// BuildControlRequest resolves an optional provider lifecycle hook. The host
+// uses the same channel transport as submit/poll requests, while the plugin
+// remains responsible for the provider URL, authentication and payload.
+func (a *TaskAdaptor) BuildControlRequest(task *model.Task, action string) (*channel.TaskControlRequest, error) {
+	if !a.hasHook(context.Background(), "buildControlRequest") {
+		return nil, nil
+	}
+	if a.info == nil {
+		return nil, fmt.Errorf("plugin adaptor is not initialized")
+	}
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "cancel" && action != "delete" {
+		return nil, fmt.Errorf("unsupported task control action")
+	}
+	ctx, err := taskArtifactContext(task)
+	if err != nil {
+		return nil, err
+	}
+	ctx["action"] = action
+	ctx["upstreamTaskId"] = task.GetUpstreamTaskID()
+	ctx["baseUrl"] = a.info.ChannelBaseUrl
+	proxy := a.info.ChannelSetting.Proxy
+	auth, err := resolveAuth(a.plugin.Meta.Auth, a.info.ApiKey, proxy)
+	if err != nil {
+		return nil, err
+	}
+	ctx["auth"] = auth
+	ctx["authHeader"] = auth["authHeader"]
+	if a.plugin.Meta.Auth.Type == "" || a.plugin.Meta.Auth.Type == "none" || a.plugin.Meta.Auth.Type == "api_key" {
+		ctx["apiKey"] = a.info.ApiKey
+	}
+	value, err := a.plugin.Engine.Call(context.Background(), "buildControlRequest", ctx)
+	if err != nil {
+		return nil, err
+	}
+	var descriptor requestDescriptor
+	if err = convert(value, &descriptor); err != nil {
+		return nil, err
+	}
+	method := strings.ToUpper(strings.TrimSpace(descriptor.Method))
+	if method == "" {
+		method = http.MethodDelete
+	}
+	if method != http.MethodDelete && method != http.MethodPost {
+		return nil, fmt.Errorf("plugin returned an unsupported control request method")
+	}
+	if err = pluginruntime.ValidateRequestURL(descriptor.URL, a.info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts); err != nil {
+		return nil, err
+	}
+	var body []byte
+	if descriptor.Body != nil {
+		if text, ok := descriptor.Body.(string); ok {
+			body = []byte(text)
+		} else if body, err = common.Marshal(descriptor.Body); err != nil {
+			return nil, fmt.Errorf("plugin returned an invalid control request body")
+		}
+	}
+	return &channel.TaskControlRequest{URL: descriptor.URL, Method: method, Headers: descriptor.Headers, Body: body}, nil
+}
+
 func taskArtifactContext(task *model.Task) (map[string]any, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
@@ -1481,6 +1541,7 @@ var _ channel.TaskAdaptor = (*TaskAdaptor)(nil)
 var _ channel.OpenAIVideoConverter = (*TaskAdaptor)(nil)
 var _ channel.TaskArtifactProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskContentRequestProvider = (*TaskAdaptor)(nil)
+var _ channel.TaskControlRequestProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskUsageFactsProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskValidatedBillingProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskValidatedUsageFactsProvider = (*TaskAdaptor)(nil)
