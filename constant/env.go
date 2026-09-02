@@ -19,6 +19,11 @@ var ErrorLogEnabled bool
 var TaskQueryLimit int
 var TaskTimeoutMinutes int
 var TaskPluginProtocolTimeoutSeconds int
+
+// TaskUpstreamTimeoutSeconds bounds one task-provider HTTP request. It is
+// separate from RelayTimeout so long-lived streaming chat requests keep their
+// existing semantics.
+var TaskUpstreamTimeoutSeconds int
 var TaskPluginProtocolTickMilliseconds int
 var TaskPluginProtocolTickJitterMilliseconds int
 var TaskPluginProtocolHeartbeatSeconds int

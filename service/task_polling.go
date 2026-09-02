@@ -296,7 +296,7 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 			task.Progress = responseItem.TaskInfo.Progress
 		}
 		if responseItem.TaskInfo.Reason != "" || task.Status == model.TaskStatusFailure {
-			logger.LogInfo(ctx, task.TaskID+" 构建失败，"+task.FailReason)
+			logger.LogInfo(ctx, task.TaskID+" 构建失败，"+common.LocalLogPreview(common.MaskSensitiveInfo(task.FailReason)))
 			task.Status = model.TaskStatusFailure
 			task.Progress = "100%"
 		}
@@ -447,12 +447,19 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if privateData.Key != "" {
 		key = privateData.Key
 	}
-	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
+	snap := task.Snapshot()
+	resp, err := fetchTaskWithRetry(ctx, adaptor, baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  constant.NormalizeTaskAction(task.Action),
 	}, proxy)
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
+	}
+	if resp.Body == nil {
+		return fmt.Errorf("fetchTask returned an empty body for task %s", taskId)
+	}
+	if upstreamRequestID := pollingUpstreamRequestID(resp.Header); upstreamRequestID != "" {
+		task.PrivateData.UpstreamRequestID = upstreamRequestID
 	}
 	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
@@ -460,9 +467,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return fmt.Errorf("readAll failed for task %s: %w", taskId, err)
 	}
 
-	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
-
-	snap := task.Snapshot()
+	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", common.LocalLogPreview(string(redactVideoResponseBody(responseBody))))
 
 	taskResult := &relaycommon.TaskInfo{}
 	// try parse as New API response format
@@ -482,7 +487,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	task.Data = redactVideoResponseBody(responseBody)
 
-	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
+	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: status=%s progress=%s has_url=%t reason=%s", taskResult.Status, taskResult.Progress, taskResult.Url != "", common.LocalLogPreview(common.MaskSensitiveInfo(taskResult.Reason)))
 
 	now := time.Now().Unix()
 	if taskResult.Status == "" {
@@ -494,6 +499,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 				// 返回规范的 OpenAI 错误格式，提取错误信息，判断错误是否为任务失败
 				if openaiError.Code == "429" {
 					// 429 错误通常表示请求过多或速率限制，暂时不认为是任务失败，保持原状态等待下一轮轮询
+					if !snap.Equal(task.Snapshot()) {
+						_, _ = task.UpdateWithStatus(snap.Status)
+					}
 					return nil
 				}
 
@@ -501,7 +509,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 				taskResult = relaycommon.FailTaskInfo("upstream returned error")
 			} else {
 				// unknown error format, log original response
-				logger.LogError(ctx, fmt.Sprintf("Task %s returned empty status with unrecognized error format, response: %s", taskId, string(responseBody)))
+				logger.LogError(ctx, fmt.Sprintf("Task %s returned empty status with unrecognized error format, response: %s", taskId, common.LocalLogPreview(string(redactVideoResponseBody(responseBody)))))
 				taskResult = relaycommon.FailTaskInfo("upstream returned unrecognized message")
 			}
 		}
@@ -537,14 +545,13 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		}
 		shouldFinalizeBilling = true
 	case model.TaskStatusFailure:
-		logger.LogJson(ctx, fmt.Sprintf("Task %s failed", taskId), task)
 		task.Status = model.TaskStatusFailure
 		task.Progress = taskcommon.ProgressComplete
 		if task.FinishTime == 0 {
 			task.FinishTime = now
 		}
 		task.FailReason = taskResult.Reason
-		logger.LogInfo(ctx, fmt.Sprintf("Task %s failed: %s", task.TaskID, task.FailReason))
+		logger.LogInfo(ctx, fmt.Sprintf("Task %s failed: %s", task.TaskID, common.LocalLogPreview(common.MaskSensitiveInfo(task.FailReason))))
 		taskResult.Progress = taskcommon.ProgressComplete
 		shouldFinalizeBilling = true
 	default:
@@ -581,6 +588,60 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	return nil
+}
+
+// fetchTaskWithRetry retries only idempotent polling reads. A provider may
+// briefly return a transport error, 408, 429 or 5xx while the task itself is
+// still healthy; retrying these reads avoids turning a transient outage into a
+// false task failure. The final response is returned to the normal parser so
+// provider-specific error envelopes remain visible to the state machine.
+func fetchTaskWithRetry(ctx context.Context, adaptor TaskPollingAdaptor, baseURL, key string, body map[string]any, proxy string) (*http.Response, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		resp, err := adaptor.FetchTask(baseURL, key, body, proxy)
+		if err == nil && resp != nil {
+			if requestID := pollingUpstreamRequestID(resp.Header); requestID != "" {
+				logger.LogDebug(ctx, "task polling upstream request id=%s attempt=%d", common.MaskSensitiveInfo(requestID), attempt+1)
+			}
+			if !isTransientTaskPollStatus(resp.StatusCode) || attempt == maxAttempts-1 {
+				return resp, nil
+			}
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			lastErr = fmt.Errorf("polling response status %d", resp.StatusCode)
+		} else {
+			if err != nil {
+				lastErr = err
+			} else {
+				lastErr = fmt.Errorf("provider returned an empty polling response")
+			}
+		}
+		backoff := time.Duration(100*(1<<attempt)) * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return nil, lastErr
+}
+
+func isTransientTaskPollStatus(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+}
+
+func pollingUpstreamRequestID(headers http.Header) string {
+	for _, name := range []string{common.RequestIdKey, "X-Request-ID", "X-Request-Id", "X-RequestID", "Request-Id"} {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func redactVideoResponseBody(body []byte) []byte {

@@ -15,6 +15,11 @@
 任务创建、轮询、结果代理、列表、取消/删除均在网关完成。取消会使用
 Compare-And-Swap 更新本地任务并执行一次额度退款，避免轮询器并发重复退款。
 
+每个响应都会带 `X-Oneapi-Request-Id`；若上游提供请求 ID，同时返回
+`X-Upstream-Request-Id`。上游返回的请求 ID 会写入管理员任务
+详情和日志的 `upstream_request_id` 字段；任务创建成功后还会持久化上游任务
+ID，因而可以用“网关请求 ID → 上游请求 ID → 任务 ID”定位一次完整调用。
+
 ## 渠道配置
 
 在管理后台新增一个“任务插件”渠道：
@@ -67,6 +72,20 @@ Compare-And-Swap 更新本地任务并执行一次额度退款，避免轮询器
 认证。资费查询/导出接口也已透传，但 New API 的客户额度结算仍以自身账单
 系统为准。
 
+## 错误、超时与幂等
+
+上游错误会保留在管理员日志（敏感字段脱敏、正文截断），对客户返回稳定的
+语义错误：503→409 `upstream_busy`、501→422 `feature_unavailable`、网关或
+上游超时→409 `upstream_timeout`、401/403→凭证错误、429→429 `rate_limited`。
+任务创建的单次上游请求默认 120 秒，可通过
+`TASK_UPSTREAM_TIMEOUT_SECONDS` 调整。创建阶段按现有 `RETRY_TIMES` 对 429/5xx
+重试；轮询读取对传输错误、408、429、5xx 做最多 3 次短退避重试。
+
+客户端可在 `POST /v1/videos` 或 Ark 创建接口带 `Idempotency-Key`（最长 255
+字符）。相同用户、路径和 key 在 24 小时内只会产生一个任务；并发重复请求返回
+`idempotency_in_progress`，已完成请求会重放原任务响应。Redis 部署使用 Redis
+原子锁，未启用 Redis 时自动退回单节点内存锁。
+
 ## 润元扩展
 
 对外协议、任务模型、素材 API 的网关边界已经独立。接入润元时新增一个
@@ -78,3 +97,7 @@ provider 插件，复用列表/取消/删除/素材控制器，只实现其鉴�
 没有真实移动云 AK/SK 和可访问素材 URL 时只能完成协议与签名单元测试，不能
 替代真实计费任务的端到端验收。上线前应使用测试账户验证：创建任务、轮询成功、
 视频代理、取消退款、创建素材、查询素材和预签名 URL 访问。
+
+可直接运行 `pwsh -File e2e/mobilecloud-seedance.ps1 -BaseUrl
+https://HOST -Token TOKEN` 做真实网关验收。脚本不会接触或输出移动云密钥；
+移动云 Bearer key 必须先在后台的 `mobilecloud` 渠道中配置。

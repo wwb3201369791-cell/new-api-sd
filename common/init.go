@@ -205,6 +205,7 @@ func initConstantEnv() {
 	// 声明式任务协议桥只观察数据库；这些值控制一次客户端观察连接，
 	// 不改变后台轮询或结算生命周期。
 	constant.TaskPluginProtocolTimeoutSeconds = GetEnvOrDefault("TASK_PLUGIN_PROTOCOL_TIMEOUT_SECONDS", 600)
+	constant.TaskUpstreamTimeoutSeconds = GetEnvOrDefault("TASK_UPSTREAM_TIMEOUT_SECONDS", 120)
 	constant.TaskPluginProtocolTickMilliseconds = GetEnvOrDefault("TASK_PLUGIN_PROTOCOL_TICK_MILLISECONDS", 2000)
 	constant.TaskPluginProtocolTickJitterMilliseconds = GetEnvOrDefault("TASK_PLUGIN_PROTOCOL_TICK_JITTER_MILLISECONDS", 500)
 	constant.TaskPluginProtocolHeartbeatSeconds = GetEnvOrDefault("TASK_PLUGIN_PROTOCOL_HEARTBEAT_SECONDS", 15)

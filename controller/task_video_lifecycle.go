@@ -143,6 +143,7 @@ func DeleteTaskPluginVideo(c *gin.Context) {
 	if action == "cancel" {
 		status = "cancelled"
 	}
+	setTaskTraceHeaders(c)
 	c.JSON(http.StatusOK, gin.H{"id": taskID, "status": status})
 }
 
@@ -241,6 +242,8 @@ func writeVideoLifecycleError(c *gin.Context, taskErr *taskdto.TaskError) {
 	if taskErr == nil {
 		return
 	}
+	setTaskTraceHeaders(c)
+	taskErr = service.PublicTaskError(taskErr, c.GetString(common.RequestIdKey))
 	status := taskErr.StatusCode
 	if status < 100 || status > 599 {
 		status = http.StatusBadGateway

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,6 +63,43 @@ func TestResetStatusCode(t *testing.T) {
 			require.Equal(t, tc.expectedCode, newAPIError.StatusCode)
 		})
 	}
+}
+
+func TestPublicTaskErrorMapsProviderFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		status     int
+		code       string
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "busy", status: http.StatusServiceUnavailable, wantStatus: http.StatusConflict, wantCode: "upstream_busy"},
+		{name: "unsupported", status: http.StatusNotImplemented, wantStatus: http.StatusUnprocessableEntity, wantCode: "feature_unavailable"},
+		{name: "timeout", status: http.StatusGatewayTimeout, wantStatus: http.StatusConflict, wantCode: "upstream_timeout"},
+		{name: "auth", status: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized, wantCode: "channel_credential_invalid"},
+		{name: "rate limit", status: http.StatusTooManyRequests, wantStatus: http.StatusTooManyRequests, wantCode: "rate_limited"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := PublicTaskError(TaskErrorWrapper(errors.New("provider detail"), tc.code, tc.status), "req-123")
+			require.Equal(t, tc.wantStatus, got.StatusCode)
+			require.Equal(t, tc.wantCode, got.Code)
+			require.Contains(t, got.Message, "req-123")
+			require.NotContains(t, got.Message, "provider detail")
+		})
+	}
+}
+
+func TestTaskErrorRedactsCredentials(t *testing.T) {
+	t.Parallel()
+	got := TaskErrorWrapper(errors.New("authorization: Bearer SECRET access_key=AK secret_key=SK"), "upstream", http.StatusBadGateway)
+	require.NotContains(t, got.Message, "SECRET")
+	require.NotContains(t, got.Message, "AK")
+	require.NotContains(t, got.Message, "SK")
+	require.Contains(t, got.Message, "***")
 }
 
 func TestRelayErrorHandlerTruncatesInvalidJSONBodyInLog(t *testing.T) {

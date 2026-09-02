@@ -175,7 +175,7 @@ func appendTaskLogInfo(task *model.Task, other map[string]interface{}) {
 	if task.PrivateData.Execution != nil {
 		AppendTaskPluginAuditInfo(other, task.PrivateData.Execution.TaskPlugin)
 	}
-	if task.PrivateData.UpstreamTaskID == "" && task.PrivateData.NodeName == "" {
+	if task.PrivateData.UpstreamTaskID == "" && task.PrivateData.UpstreamRequestID == "" && task.PrivateData.NodeName == "" {
 		return
 	}
 	rootInfo, ok := other["root_info"].(map[string]interface{})
@@ -185,6 +185,9 @@ func appendTaskLogInfo(task *model.Task, other map[string]interface{}) {
 	}
 	if task.PrivateData.UpstreamTaskID != "" {
 		rootInfo["upstream_task_id"] = task.PrivateData.UpstreamTaskID
+	}
+	if task.PrivateData.UpstreamRequestID != "" {
+		rootInfo["upstream_request_id"] = task.PrivateData.UpstreamRequestID
 	}
 	if task.PrivateData.NodeName != "" {
 		rootInfo["node_name"] = task.PrivateData.NodeName

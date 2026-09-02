@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -341,6 +342,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 9. 发送请求
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, service.TaskErrorWrapper(err, "upstream_timeout", http.StatusGatewayTimeout)
+		}
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 	}
 	if resp == nil {
@@ -764,6 +768,7 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if adaptor == nil {
 		return nil
 	}
+	snap := task.Snapshot()
 
 	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
@@ -771,6 +776,9 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	}, proxy)
 	if err != nil || resp == nil {
 		return nil
+	}
+	if upstreamRequestID := taskUpstreamRequestID(resp.Header); upstreamRequestID != "" {
+		task.PrivateData.UpstreamRequestID = upstreamRequestID
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -782,8 +790,6 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if err != nil || ti == nil {
 		return nil
 	}
-
-	snap := task.Snapshot()
 
 	// 将上游最新状态更新到 task
 	if ti.Status != "" {
@@ -825,6 +831,15 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		Data: out,
 	})
 	return respBody
+}
+
+func taskUpstreamRequestID(headers http.Header) string {
+	for _, name := range []string{common.RequestIdKey, "X-Request-ID", "X-Request-Id", "X-RequestID", "Request-Id"} {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // detectVideoFormat 从 Gemini/Vertex 原始响应中探测视频格式

@@ -505,6 +505,7 @@ func RelayTaskPluginEndpoint(c *gin.Context, fallback gin.HandlerFunc) {
 }
 
 func RelayTaskFetch(c *gin.Context) {
+	setTaskTraceHeaders(c)
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, &taskdto.TaskError{
@@ -515,6 +516,7 @@ func RelayTaskFetch(c *gin.Context) {
 		return
 	}
 	if taskErr := relay.RelayTaskFetch(c, relayInfo.RelayMode); taskErr != nil {
+		taskErr = service.PublicTaskError(taskErr, c.GetString(common.RequestIdKey))
 		if respondArkSeedanceError(c, taskErr) {
 			return
 		}
@@ -541,6 +543,33 @@ func RelayTask(c *gin.Context) {
 	if action := c.GetString("task_action"); action != "" {
 		relayInfo.Action = action
 	}
+	if relayInfo.TaskRelayInfo != nil {
+		if existingTask, lease, idempotencyErr := beginTaskIdempotency(c, relayInfo); idempotencyErr != nil {
+			respondTaskSubmissionError(c, idempotencyErr)
+			return
+		} else if existingTask != nil {
+			c.Header("Idempotency-Replayed", "true")
+			if existingTask.PrivateData.UpstreamRequestID != "" {
+				c.Header(common.UpstreamRequestIdKey, existingTask.PrivateData.UpstreamRequestID)
+			}
+			presentTaskSubmission(c, &taskSubmissionOutcome{
+				Task:      existingTask,
+				RelayInfo: relayInfo,
+				Result: &relay.TaskSubmitResult{
+					UpstreamTaskID: existingTask.GetUpstreamTaskID(),
+					TaskData:       existingTask.Data,
+					Platform:       existingTask.Platform,
+					Quota:          existingTask.Quota,
+				},
+			})
+			return
+		} else if lease != nil {
+			defer lease.release()
+			// Commit is performed after the durable task barrier below. The lease
+			// is attached to the request context so all return paths release it.
+			c.Set(taskIdempotencyLeaseContextKey, lease)
+		}
+	}
 
 	if taskErr := relay.ResolveOriginTask(c, relayInfo); taskErr != nil {
 		respondTaskSubmissionError(c, taskErr)
@@ -555,6 +584,11 @@ func RelayTask(c *gin.Context) {
 	if taskErr != nil {
 		respondTaskSubmissionError(c, taskErr)
 		return
+	}
+	if leaseValue, exists := c.Get(taskIdempotencyLeaseContextKey); exists {
+		if lease, ok := leaseValue.(*taskIdempotencyLease); ok {
+			lease.commit(outcome.Task.TaskID)
+		}
 	}
 	presentTaskSubmission(c, outcome)
 }
@@ -711,6 +745,7 @@ func executeTaskSubmissionWith(
 	task := model.InitTask(result.Platform, relayInfo)
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	task.PrivateData.UpstreamRequestID = c.GetString(common.UpstreamRequestIdKey)
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
@@ -767,6 +802,7 @@ func executeTaskSubmissionWith(
 }
 
 func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
+	setTaskTraceHeaders(c)
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	otherRatios := outcome.RelayInfo.PriceData.OtherRatios()
 	if otherRatios == nil {
@@ -829,14 +865,30 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 }
 
 func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
+	if taskErr == nil {
+		return
+	}
+	setTaskTraceHeaders(c)
+	// Keep the internal error intact for diagnostics; only the response copy is
+	// normalized for external callers.
+	publicErr := service.PublicTaskError(taskErr, c.GetString(common.RequestIdKey))
 	newTaskPluginSubmitDiagnostics(c).presentError(taskErr)
-	if respondArkSeedanceError(c, taskErr) {
+	if respondArkSeedanceError(c, publicErr) {
 		return
 	}
-	if middleware.RespondTaskPluginError(c, taskErr) {
+	if middleware.RespondTaskPluginError(c, publicErr) {
 		return
 	}
-	respondTaskError(c, taskErr)
+	respondTaskError(c, publicErr)
+}
+
+func setTaskTraceHeaders(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	if upstreamRequestID := c.GetString(common.UpstreamRequestIdKey); upstreamRequestID != "" {
+		c.Header(common.UpstreamRequestIdKey, upstreamRequestID)
+	}
 }
 
 // respondArkSeedanceError keeps the Volcano-compatible endpoint's error
@@ -887,6 +939,8 @@ func respondArkSeedanceError(c *gin.Context, taskErr *taskdto.TaskError) bool {
 		errorType = "Conflict"
 	case http.StatusTooManyRequests:
 		errorType = "TooManyRequests"
+	case http.StatusUnprocessableEntity:
+		errorType = "UnprocessableEntity"
 	}
 	c.JSON(status, gin.H{"error": gin.H{
 		"code":    code,
@@ -899,10 +953,11 @@ func respondArkSeedanceError(c *gin.Context, taskErr *taskdto.TaskError) bool {
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
-	if taskErr.StatusCode == http.StatusTooManyRequests {
-		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
+	if taskErr == nil {
+		return
 	}
-	c.JSON(taskErr.StatusCode, taskErr)
+	publicErr := service.PublicTaskError(taskErr, c.GetString(common.RequestIdKey))
+	c.JSON(publicErr.StatusCode, publicErr)
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskError, retryTimes int) bool {
@@ -918,8 +973,14 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskEr
 	if service.GetChannelConstraints(c).SuppressesRetry() {
 		return false
 	}
+	if taskErr.LocalError {
+		return false
+	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		return true
+	}
+	if taskErr.StatusCode == http.StatusUnauthorized || taskErr.StatusCode == http.StatusForbidden || taskErr.StatusCode == http.StatusNotImplemented || taskErr.StatusCode == http.StatusUnprocessableEntity {
+		return false
 	}
 	if taskErr.StatusCode == 307 {
 		return true
@@ -934,12 +995,11 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskEr
 	if taskErr.StatusCode == http.StatusBadRequest {
 		return false
 	}
-	if taskErr.StatusCode == 408 {
-		// azure处理超时不重试
-		return false
-	}
-	if taskErr.LocalError {
-		return false
+	if taskErr.StatusCode == http.StatusRequestTimeout {
+		// Task providers may return 408 while accepting work asynchronously;
+		// retrying the idempotent gateway submission is preferable to exposing a
+		// transient timeout to the caller.
+		return true
 	}
 	if taskErr.StatusCode/100 == 2 {
 		return false

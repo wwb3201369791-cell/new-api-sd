@@ -1241,6 +1241,14 @@ func RespondTaskPluginError(c *gin.Context, taskErr *dto.TaskError) bool {
 		return false
 	}
 	sanitized := sanitizedTaskPluginError(taskErr.StatusCode, taskErr.Message)
+	// Controller-level task errors may carry a semantic, already-redacted code
+	// (for example upstream_timeout). Preserve that contract for native plugin
+	// renderers instead of replacing it with the generic HTTP bucket.
+	if isPublicTaskPluginErrorCode(taskErr.Code) {
+		sanitized.Code = taskErr.Code
+		sanitized.Message = taskErr.Message
+		sanitized.Retryable = taskErr.Code == "upstream_timeout" || taskErr.Code == "upstream_busy" || taskErr.Code == "upstream_unavailable" || taskErr.Code == "rate_limited"
+	}
 	requestID := c.GetString(common.RequestIdKey)
 	hasRenderer, err := pinned.Plugin.Engine.HasCallablePath(c.Request.Context(), "native", "error")
 	requestValue, exists := c.Get(pluginruntime.ContextKeyRouteRequest)
@@ -1325,6 +1333,8 @@ func sanitizedTaskPluginError(status int, detail string) dto.TaskPluginError {
 		taskErr = dto.TaskPluginError{Code: "task_not_found", Message: "Task not found", HTTPStatus: status}
 	case http.StatusConflict:
 		taskErr = dto.TaskPluginError{Code: "request_conflict", Message: "Request conflict", HTTPStatus: status}
+	case http.StatusUnprocessableEntity:
+		taskErr = dto.TaskPluginError{Code: "feature_unavailable", Message: "Feature unavailable", HTTPStatus: status}
 	case http.StatusTooManyRequests:
 		taskErr = dto.TaskPluginError{Code: "rate_limit_exceeded", Message: "Too many requests", HTTPStatus: status, Retryable: true}
 	default:
@@ -1341,6 +1351,15 @@ func sanitizedTaskPluginError(status int, detail string) dto.TaskPluginError {
 		taskErr.Message = detail
 	}
 	return taskErr
+}
+
+func isPublicTaskPluginErrorCode(code string) bool {
+	switch strings.TrimSpace(code) {
+	case "upstream_timeout", "upstream_busy", "upstream_unavailable", "feature_unavailable", "channel_credential_invalid", "rate_limited", "idempotency_in_progress", "invalid_idempotency_key":
+		return true
+	default:
+		return false
+	}
 }
 
 func taskPluginHookDetail(err error) string {

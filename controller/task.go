@@ -448,8 +448,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		}
 		if viewerRole >= common.RoleRootUser {
 			rootInfo := &dto.TaskRootInfo{
-				UpstreamTaskID: task.PrivateData.UpstreamTaskID,
-				NodeName:       task.PrivateData.NodeName,
+				UpstreamTaskID:    task.PrivateData.UpstreamTaskID,
+				UpstreamRequestID: task.PrivateData.UpstreamRequestID,
+				NodeName:          task.PrivateData.NodeName,
 			}
 			if execution := task.PrivateData.Execution; execution != nil {
 				if snapshot := execution.TaskPlugin; snapshot != nil {

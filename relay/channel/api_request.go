@@ -12,6 +12,7 @@ import (
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	hostconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -549,13 +550,25 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		))
 	}
 
-	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+	if upID := upstreamRequestID(resp); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()
 	return resp, nil
+}
+
+func upstreamRequestID(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	for _, name := range []string{common2.RequestIdKey, "X-Request-ID", "X-Request-Id", "X-RequestID", "Request-Id"} {
+		if value := strings.TrimSpace(resp.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
@@ -581,11 +594,43 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	// Task creation is asynchronous, so a stuck provider must not hold a
+	// gateway worker forever. Keep the timeout scoped to this request only and
+	// cancel it when the response body is closed after parsing.
+	var cancel context.CancelFunc
+	if hostconstant.TaskUpstreamTimeoutSeconds > 0 {
+		var taskCtx context.Context
+		taskCtx, cancel = context.WithTimeout(req.Context(), time.Duration(hostconstant.TaskUpstreamTimeoutSeconds)*time.Second)
+		req = req.WithContext(taskCtx)
+	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("do request failed: %w", err)
 	}
+	if cancel != nil && resp != nil && resp.Body != nil {
+		resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	} else if cancel != nil {
+		cancel()
+	}
 	return resp, nil
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	if b.cancel != nil {
+		b.cancel()
+	}
+	if b.ReadCloser == nil {
+		return nil
+	}
+	return b.ReadCloser.Close()
 }
 
 func newTaskAPIRequest(c *gin.Context, fullRequestURL string, requestBody io.Reader) (*http.Request, error) {

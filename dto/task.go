@@ -81,9 +81,10 @@ type TaskAdminInfo struct {
 }
 
 type TaskRootInfo struct {
-	TaskPlugin     *TaskPluginRuntimeInfo `json:"task_plugin,omitempty"`
-	UpstreamTaskID string                 `json:"upstream_task_id,omitempty"`
-	NodeName       string                 `json:"node_name,omitempty"`
+	TaskPlugin        *TaskPluginRuntimeInfo `json:"task_plugin,omitempty"`
+	UpstreamTaskID    string                 `json:"upstream_task_id,omitempty"`
+	UpstreamRequestID string                 `json:"upstream_request_id,omitempty"`
+	NodeName          string                 `json:"node_name,omitempty"`
 }
 
 type FetchReq struct {

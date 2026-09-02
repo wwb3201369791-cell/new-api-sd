@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
+
+var taskSensitiveCredentialPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+|(?:api[_-]?key|access[_-]?key|secret[_-]?key|token)\s*[:=]\s*)([^\s,;"']+)`)
 
 func MidjourneyErrorWrapper(code int, desc string) *taskdto.MidjourneyResponse {
 	return &taskdto.MidjourneyResponse{
@@ -198,22 +201,94 @@ func TaskErrorWrapperLocal(err error, code string, statusCode int) *taskdto.Task
 }
 
 func TaskErrorWrapper(err error, code string, statusCode int) *taskdto.TaskError {
-	text := err.Error()
-	lowerText := strings.ToLower(text)
-	if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-		common.SysLog(fmt.Sprintf("error: %s", text))
-		//text = "请求上游地址失败"
-		text = common.MaskSensitiveInfo(text)
+	if err == nil {
+		err = errors.New("task request failed")
 	}
+	text := err.Error()
+	// Keep diagnostics useful for operators while ensuring provider URLs,
+	// credentials and query strings are never copied verbatim into API errors.
+	text = redactTaskErrorText(text)
+	common.SysLog(fmt.Sprintf("task error code=%s status=%d detail=%s", code, statusCode, common.LocalLogPreview(text)))
 	//避免暴露内部错误
 	taskError := &taskdto.TaskError{
 		Code:       code,
 		Message:    text,
 		StatusCode: statusCode,
-		Error:      err,
+		Error:      &taskDiagnosticError{cause: err, message: text},
 	}
 
 	return taskError
+}
+
+func redactTaskErrorText(text string) string {
+	text = common.MaskSensitiveInfo(text)
+	text = taskSensitiveCredentialPattern.ReplaceAllString(text, "$1***")
+	return common.LocalLogPreview(text)
+}
+
+type taskDiagnosticError struct {
+	cause   error
+	message string
+}
+
+func (e *taskDiagnosticError) Error() string { return e.message }
+
+func (e *taskDiagnosticError) Unwrap() error { return e.cause }
+
+// PublicTaskError projects an internal task failure into a stable, user-facing
+// error contract. Provider status codes are intentionally not leaked for
+// transient gateway failures: callers get a semantic code and a useful next
+// action while the original TaskError remains available to diagnostics and
+// retry logic.
+func PublicTaskError(taskErr *taskdto.TaskError, requestID string) *taskdto.TaskError {
+	if taskErr == nil {
+		return nil
+	}
+	publicErr := *taskErr
+	publicErr.Message = redactTaskErrorText(strings.TrimSpace(publicErr.Message))
+	status := publicErr.StatusCode
+	code := strings.TrimSpace(publicErr.Code)
+	message := strings.TrimSpace(publicErr.Message)
+
+	if errors.Is(publicErr.Error, context.DeadlineExceeded) || code == "upstream_timeout" || status == http.StatusGatewayTimeout || status == http.StatusRequestTimeout {
+		status = http.StatusConflict
+		code = "upstream_timeout"
+		message = "上游处理超时，请稍后查询任务状态或重试。"
+	} else {
+		switch status {
+		case http.StatusServiceUnavailable:
+			status = http.StatusConflict
+			code = "upstream_busy"
+			message = "视频上游当前繁忙，任务暂未提交，请稍后重试。"
+		case http.StatusNotImplemented:
+			status = http.StatusUnprocessableEntity
+			code = "feature_unavailable"
+			message = "当前渠道暂不支持此功能，请调整参数或更换渠道。"
+		case http.StatusBadGateway:
+			status = http.StatusConflict
+			code = "upstream_unavailable"
+			message = "视频上游暂时不可用，请稍后重试。"
+		case http.StatusUnauthorized, http.StatusForbidden:
+			code = "channel_credential_invalid"
+			message = "渠道凭证无效或已过期，请联系管理员。"
+		case http.StatusTooManyRequests:
+			code = "rate_limited"
+			message = "上游请求过于频繁，请稍后重试。"
+		}
+	}
+	if code == "" {
+		code = "request_failed"
+	}
+	if message == "" || status >= 500 {
+		message = "任务请求失败，请稍后重试。"
+	}
+	publicErr.Code = code
+	publicErr.Message = message
+	publicErr.StatusCode = status
+	if requestID != "" && !strings.Contains(publicErr.Message, requestID) {
+		publicErr.Message = common.MessageWithRequestId(publicErr.Message, requestID)
+	}
+	return &publicErr
 }
 
 // TaskErrorFromAPIError 将 PreConsumeBilling 返回的 NewAPIError 转换为 TaskError。

@@ -39,6 +39,23 @@ type batchPollingAdaptor struct {
 	results    map[string]*BatchTaskResult
 }
 
+type transientPollingAdaptor struct{ calls int }
+
+func (a *transientPollingAdaptor) Init(_ *relaycommon.RelayInfo) {}
+func (a *transientPollingAdaptor) FetchTask(_ string, _ string, _ map[string]any, _ string) (*http.Response, error) {
+	a.calls++
+	if a.calls == 1 {
+		return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader("busy"))}, nil
+	}
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+}
+func (a *transientPollingAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+	return &relaycommon.TaskInfo{Status: model.TaskStatusInProgress}, nil
+}
+func (a *transientPollingAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
+	return 0
+}
+
 func (a *batchPollingAdaptor) FetchMode() string { return "batch" }
 func (a *batchPollingAdaptor) FetchBatchTasks(_ string, _ string, taskIDs []string, _ string) (*http.Response, error) {
 	a.batchCalls++
@@ -115,6 +132,21 @@ func (a *taskPollingFetchAdaptor) fetchedTaskIDs() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.taskIDs...)
+}
+
+func TestFetchTaskWithRetryRetriesTransientResponses(t *testing.T) {
+	t.Parallel()
+	adaptor := &transientPollingAdaptor{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	resp, err := fetchTaskWithRetry(ctx, adaptor, "https://provider.example", "KEY", map[string]any{"task_id": "task"}, "")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 2, adaptor.calls)
+	defer resp.Body.Close()
+	body, readErr := io.ReadAll(resp.Body)
+	require.NoError(t, readErr)
+	assert.Equal(t, "ok", string(body))
 }
 
 func TestRedactVideoResponseBodyPreservesPollingPayloadShape(t *testing.T) {

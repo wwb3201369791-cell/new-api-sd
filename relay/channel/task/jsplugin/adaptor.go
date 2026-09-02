@@ -628,8 +628,16 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 	if method == "" {
 		method = http.MethodGet
 	}
-	req, err := http.NewRequest(method, descriptor.URL, requestBody)
+	requestCtx := context.Background()
+	var cancel context.CancelFunc
+	if constant.TaskUpstreamTimeoutSeconds > 0 {
+		requestCtx, cancel = context.WithTimeout(requestCtx, time.Duration(constant.TaskUpstreamTimeoutSeconds)*time.Second)
+	}
+	req, err := http.NewRequestWithContext(requestCtx, method, descriptor.URL, requestBody)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
 	}
 	for name, value := range descriptor.Headers {
@@ -642,6 +650,9 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 	started := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		logger.LogDebug(
 			context.Background(),
 			"task_plugin subsystem=adaptor event=query_request_failed plugin=%q method=%q reason=transport_error elapsed_ms=%d",
@@ -650,6 +661,11 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 			time.Since(started).Milliseconds(),
 		)
 		return nil, err
+	}
+	if cancel != nil && resp.Body != nil {
+		resp.Body = &taskPollingCancelBody{ReadCloser: resp.Body, cancel: cancel}
+	} else if cancel != nil {
+		cancel()
 	}
 	logger.LogDebug(
 		context.Background(),
@@ -660,6 +676,21 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 		time.Since(started).Milliseconds(),
 	)
 	return resp, nil
+}
+
+type taskPollingCancelBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *taskPollingCancelBody) Close() error {
+	if b.cancel != nil {
+		b.cancel()
+	}
+	if b.ReadCloser == nil {
+		return nil
+	}
+	return b.ReadCloser.Close()
 }
 
 func (a *TaskAdaptor) ParseBatchResult(body []byte) (map[string]*service.BatchTaskResult, error) {
