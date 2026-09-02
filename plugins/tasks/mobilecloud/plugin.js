@@ -12,6 +12,9 @@ export const meta = {
   // Third-party task plugin channels are bound by task_plugin_key. Keep the
   // public alias documented by Mobile Cloud; channel model_mapping can map it
   // to a deployment-specific model name when required.
+  // Multiple task-provider plugins may expose this same public model. The
+  // host chooses the configured channel by task_plugin_key.
+  sharedModels: true,
   models: ["doubao-seedance-2.0"],
   fetchMode: "per_task",
   usageSchema: {
@@ -285,6 +288,7 @@ export function buildSubmitRequest(ctx) {
     "ratio",
     "resolution",
     "watermark",
+    "callback_url",
     "generate_audio",
     "return_last_frame",
     "seed",

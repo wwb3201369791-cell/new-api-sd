@@ -249,7 +249,7 @@ func SetApiRouter(router *gin.Engine) {
 			taskPluginRoute.POST("/:key/dryrun", controller.DryRunTaskPlugin)
 			taskPluginRoute.DELETE("/:key/versions/:version", controller.DeleteTaskPluginVersion)
 		}
-		// Mobile Cloud asset management. Credentials remain in the selected
+		// Provider asset management. Credentials remain in the selected
 		// task-plugin channel; these user-authenticated routes expose only the
 		// provider's asset/group data and signed media URLs.
 		// Local object URLs are deliberately public capability URLs so the

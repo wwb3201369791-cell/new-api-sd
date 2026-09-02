@@ -75,14 +75,19 @@ func (t *LocalizedText) UnmarshalJSON(data []byte) error {
 }
 
 type Meta struct {
-	APIVersion    int                         `json:"apiVersion"`
-	Key           string                      `json:"key"`
-	Name          string                      `json:"name"`
-	Icon          string                      `json:"icon,omitempty"`
-	Description   LocalizedText               `json:"description,omitempty"`
-	Version       string                      `json:"version"`
-	Author        AuthorMeta                  `json:"author"`
-	ChannelTypes  []int                       `json:"channelTypes,omitempty"`
+	APIVersion   int           `json:"apiVersion"`
+	Key          string        `json:"key"`
+	Name         string        `json:"name"`
+	Icon         string        `json:"icon,omitempty"`
+	Description  LocalizedText `json:"description,omitempty"`
+	Version      string        `json:"version"`
+	Author       AuthorMeta    `json:"author"`
+	ChannelTypes []int         `json:"channelTypes,omitempty"`
+	// SharedModels allows multiple task-provider plugins to claim the same
+	// public model. Channel distribution later selects the provider by the
+	// channel's task_plugin_key, while the first declaration remains the
+	// canonical model spelling.
+	SharedModels  bool                        `json:"sharedModels,omitempty"`
 	Models        []string                    `json:"models"`
 	FetchMode     string                      `json:"fetchMode"`
 	AllowedHosts  []string                    `json:"allowedHosts"`
@@ -946,7 +951,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "apiVersion", "key", "name", "icon", "description", "version", "author", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "auth", "endpoints", "submitPaths", "actions":
+		case "apiVersion", "key", "name", "icon", "description", "version", "author", "channelTypes", "channelType", "compatibleChannelTypes", "sharedModels", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, fmt.Errorf("plugin meta has unknown field %q", field)
 		}
@@ -1007,6 +1012,13 @@ func decodeMeta(value any) (Meta, error) {
 	meta.Models, err = strictStringSlice(object, "models")
 	if err != nil {
 		return Meta{}, err
+	}
+	if rawShared, exists := object["sharedModels"]; exists {
+		var ok bool
+		meta.SharedModels, ok = rawShared.(bool)
+		if !ok {
+			return Meta{}, fmt.Errorf("plugin meta sharedModels must be a boolean")
+		}
 	}
 	meta.AllowedHosts, err = strictStringSlice(object, "allowedHosts")
 	if err != nil {

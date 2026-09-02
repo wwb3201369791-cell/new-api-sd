@@ -41,9 +41,13 @@ const (
 )
 
 type ChannelFilter struct {
-	Kind                   ChannelFilterKind
-	RequestPath            string
-	TaskPluginKey          string
+	Kind          ChannelFilterKind
+	RequestPath   string
+	TaskPluginKey string
+	// TaskPluginKeys is used when more than one task-provider plugin claims
+	// the same public model. TaskPluginKey remains the single-key compatibility
+	// field for existing callers.
+	TaskPluginKeys         []string
 	TaskPluginChannelTypes []int
 }
 

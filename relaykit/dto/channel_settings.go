@@ -12,9 +12,10 @@ import (
 
 type ChannelSettings struct {
 	TaskPluginKey string `json:"task_plugin_key,omitempty"`
-	// Mobile Cloud asset OpenAPI credentials are kept separate from the task
-	// generation Bearer key (Channel.Key). They are optional and only used by
-	// the asset-management API.
+	// Asset-provider credentials are kept separate from the task generation
+	// Bearer key (Channel.Key). They are optional and only used by the
+	// asset-management API. Mobile Cloud uses its query signature while
+	// Runyuan uses the Volcano Ark HMAC-SHA256 signature with the same fields.
 	// AssetEnabled is a pointer so older channel settings (which predate the
 	// toggle) remain enabled when credentials are present, while an explicit
 	// false value can disable the asset library without deleting credentials.
@@ -37,9 +38,9 @@ type ChannelSettings struct {
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
 }
 
-// MobileCloudAssetLibraryEnabled reports whether the optional Mobile Cloud
-// asset library may be used for this channel. A missing toggle preserves the
-// pre-Phase-0 behavior for existing channels that already have credentials.
+// MobileCloudAssetLibraryEnabled reports whether the optional asset library
+// may be used for this channel. The legacy method name is retained for API
+// compatibility; it now applies to both Mobile Cloud and Runyuan providers.
 func (s *ChannelSettings) MobileCloudAssetLibraryEnabled() bool {
 	if s == nil {
 		return false
@@ -50,9 +51,9 @@ func (s *ChannelSettings) MobileCloudAssetLibraryEnabled() bool {
 	return strings.TrimSpace(s.AssetAccessKey) != "" && strings.TrimSpace(s.AssetSecretKey) != ""
 }
 
-// ValidateMobileCloudAssets validates the optional Mobile Cloud asset
-// settings at channel-save time. Disabled libraries are allowed to retain
-// credentials so operators can turn the feature back on later.
+// ValidateMobileCloudAssets validates the optional asset-provider settings at
+// channel-save time. Disabled libraries are allowed to retain credentials so
+// operators can turn the feature back on later.
 func (s *ChannelSettings) ValidateMobileCloudAssets() error {
 	if s == nil {
 		return nil
@@ -63,7 +64,7 @@ func (s *ChannelSettings) ValidateMobileCloudAssets() error {
 		return nil
 	}
 	if strings.TrimSpace(s.AssetAccessKey) == "" || strings.TrimSpace(s.AssetSecretKey) == "" {
-		return fmt.Errorf("asset_access_key and asset_secret_key are required when the Mobile Cloud asset library is enabled")
+		return fmt.Errorf("asset_access_key and asset_secret_key are required when the asset library is enabled")
 	}
 	if strings.TrimSpace(s.AssetBaseURL) != "" {
 		parsed, err := url.Parse(strings.TrimSpace(s.AssetBaseURL))

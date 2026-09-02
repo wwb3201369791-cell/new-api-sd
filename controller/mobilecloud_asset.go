@@ -21,7 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Mobile Cloud's asset OpenAPI is exposed as a provider-neutral management
+// Upstream asset APIs are exposed as a provider-neutral management
 // API. The browser never receives AK/SK; credentials are read from the
 // selected admin-configured task-plugin channel.
 func ListMobileCloudAssetGroups(c *gin.Context) {
@@ -232,7 +232,7 @@ func GetMobileCloudAssetStorage(c *gin.Context) {
 
 // UploadMobileCloudAsset stores a browser-selected file in the configured
 // local/S3-compatible object store. When group_id is supplied, the uploaded
-// public URL is immediately registered with Mobile Cloud as an asset so the
+// public URL is immediately registered with the selected upstream as an asset so the
 // caller has one operation to perform.
 func UploadMobileCloudAsset(c *gin.Context) {
 	store := assetstore.Get()
@@ -338,7 +338,7 @@ func UploadMobileCloudAsset(c *gin.Context) {
 }
 
 // ServeMobileCloudAsset serves local objects without requiring a user token;
-// Mobile Cloud must be able to fetch the URL asynchronously after registration.
+// The upstream must be able to fetch the URL asynchronously after registration.
 // Object keys are random, single path segments, and traversal is rejected by
 // the storage boundary.
 func ServeMobileCloudAsset(c *gin.Context) {
@@ -552,7 +552,8 @@ func mobileCloudAssetClient(c *gin.Context) (*mobilecloudasset.Client, *model.Ch
 				continue
 			}
 			setting := candidate.GetSetting()
-			if strings.EqualFold(strings.TrimSpace(setting.TaskPluginKey), "mobilecloud") && setting.MobileCloudAssetLibraryEnabled() {
+			pluginKey := strings.ToLower(strings.TrimSpace(setting.TaskPluginKey))
+			if (pluginKey == "mobilecloud" || pluginKey == "runyuan") && setting.MobileCloudAssetLibraryEnabled() {
 				channel = candidate
 				break
 			}
@@ -562,20 +563,22 @@ func mobileCloudAssetClient(c *gin.Context) (*mobilecloudasset.Client, *model.Ch
 		return nil, nil, err
 	}
 	if channel == nil {
-		return nil, nil, errors.New("no Mobile Cloud channel with asset AccessKey/SecretKey is configured")
+		return nil, nil, errors.New("no Mobile Cloud or Runyuan channel with asset AccessKey/SecretKey is configured")
 	}
 	if channel.Type != constant.ChannelTypeTaskPlugin {
 		return nil, nil, errors.New("selected channel must be a task plugin channel")
 	}
 	setting := channel.GetSetting()
-	if !strings.EqualFold(strings.TrimSpace(setting.TaskPluginKey), "mobilecloud") {
-		return nil, nil, errors.New("selected channel is not a Mobile Cloud task plugin channel")
+	pluginKey := strings.ToLower(strings.TrimSpace(setting.TaskPluginKey))
+	if pluginKey != "mobilecloud" && pluginKey != "runyuan" {
+		return nil, nil, errors.New("selected channel is not a Mobile Cloud or Runyuan task plugin channel")
 	}
 	if !setting.MobileCloudAssetLibraryEnabled() {
-		return nil, nil, errors.New("Mobile Cloud asset library is disabled or its credentials are incomplete")
+		return nil, nil, errors.New("asset library is disabled or its credentials are incomplete")
 	}
 	client, err := mobilecloudasset.NewClient(mobilecloudasset.Config{
-		BaseURL: setting.AssetBaseURL, AccessKey: setting.AssetAccessKey, SecretKey: setting.AssetSecretKey,
+		Provider: pluginKey,
+		BaseURL:  setting.AssetBaseURL, AccessKey: setting.AssetAccessKey, SecretKey: setting.AssetSecretKey,
 		ResourcePool: setting.AssetResourcePool,
 	})
 	if err != nil {
@@ -606,7 +609,99 @@ func providerBody(response *mobilecloudasset.Response) any {
 	if body, ok := envelope["body"]; ok {
 		return body
 	}
+	if response.Provider == "runyuan" {
+		return normalizeRunyuanAssetBody(envelope)
+	}
 	return envelope
+}
+
+// normalizeRunyuanAssetBody converts Runyuan's Ark Action envelope into the
+// stable camelCase shape consumed by the existing local asset index. The raw
+// provider response is still returned to API callers; normalization is only
+// used for persistence and local ownership lookups.
+func normalizeRunyuanAssetBody(envelope map[string]any) map[string]any {
+	result, ok := envelope["Result"].(map[string]any)
+	if !ok || result == nil {
+		return envelope
+	}
+	resultAction := ""
+	if metadata, ok := envelope["ResponseMetadata"].(map[string]any); ok {
+		resultAction = stringValue(metadata["Action"])
+	}
+	isAssetResult := strings.Contains(resultAction, "Asset") && !strings.Contains(resultAction, "Group")
+	out := make(map[string]any, len(result)+8)
+	for key, value := range result {
+		out[key] = value
+	}
+	if id := stringValue(result["Id"]); id != "" {
+		if isAssetResult || result["URL"] != nil || result["AssetType"] != nil || result["GroupId"] != nil {
+			out["assetId"] = id
+		} else {
+			out["groupId"] = id
+		}
+	}
+	if value, exists := result["Name"]; exists {
+		if isAssetResult || result["URL"] != nil || result["AssetType"] != nil || result["GroupId"] != nil {
+			out["assetName"] = value
+		} else {
+			out["groupName"] = value
+		}
+	}
+	if value, exists := result["Description"]; exists {
+		out["description"] = value
+	}
+	if value, exists := result["GroupType"]; exists {
+		out["groupType"] = value
+	}
+	if value, exists := result["ProjectName"]; exists {
+		out["projectName"] = value
+	}
+	if value, exists := result["URL"]; exists {
+		out["assetUrl"] = value
+	}
+	if value, exists := result["AssetType"]; exists {
+		out["assetType"] = value
+	}
+	if value, exists := result["GroupId"]; exists {
+		out["groupId"] = value
+	}
+	if value, exists := result["Status"]; exists {
+		out["status"] = value
+	}
+	if value, exists := result["ErrorMessage"]; exists {
+		out["errorMessage"] = value
+	}
+	if items, exists := result["Items"].([]any); exists {
+		normalizedItems := make([]any, 0, len(items))
+		for _, item := range items {
+			if itemMap, ok := item.(map[string]any); ok {
+				normalizedItems = append(normalizedItems, normalizeRunyuanAssetItem(itemMap))
+			} else {
+				normalizedItems = append(normalizedItems, item)
+			}
+		}
+		out["items"] = normalizedItems
+	}
+	if value, exists := result["TotalCount"]; exists {
+		out["totalCount"] = value
+		out["total"] = value
+	}
+	if value, exists := result["PageNumber"]; exists {
+		out["pageNo"] = value
+		out["page"] = value
+	}
+	if value, exists := result["PageSize"]; exists {
+		out["pageSize"] = value
+	}
+	return out
+}
+
+func normalizeRunyuanAssetItem(item map[string]any) map[string]any {
+	copy := make(map[string]any, len(item)+8)
+	for key, value := range item {
+		copy[key] = value
+	}
+	return normalizeRunyuanAssetBody(map[string]any{"Result": copy})
 }
 
 func persistAssetGroups(ctx context.Context, userID, channelID int, value any) {
@@ -673,9 +768,10 @@ func persistAssets(ctx context.Context, userID, channelID int, value any) {
 	}
 }
 
-// providerItems unwraps the pagination envelopes used by Mobile Cloud and
-// keeps single-resource responses intact. The provider has used both `list`
-// and `data` in different API revisions, so persistence must accept either.
+// providerItems unwraps the pagination envelopes used by the supported asset
+// providers and keeps single-resource responses intact. Providers have used
+// both `list` and `data` in different API revisions, so persistence accepts
+// either shape.
 func providerItems(value map[string]any) []any {
 	for _, key := range []string{"list", "items", "data", "results", "records"} {
 		nested, exists := value[key]
@@ -733,7 +829,7 @@ func assetAPIResponse(c *gin.Context, response *mobilecloudasset.Response) {
 }
 
 func assetAPIError(c *gin.Context, err error) {
-	message := "Mobile Cloud asset request failed"
+	message := "asset provider request failed"
 	status := http.StatusBadRequest
 	var providerErr *mobilecloudasset.ProviderError
 	if errors.As(err, &providerErr) && providerErr != nil {

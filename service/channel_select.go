@@ -28,9 +28,11 @@ func AppendTaskPluginIdentityFilter(c *gin.Context, pluginKey string) {
 	if c == nil {
 		return
 	}
+	pluginKeys := pinnedTaskPluginKeys(c, pluginKey)
 	GetChannelConstraints(c).AddFilter(dto.ChannelFilter{
 		Kind:                   dto.FilterTaskPluginIdentity,
 		TaskPluginKey:          pluginKey,
+		TaskPluginKeys:         pluginKeys,
 		TaskPluginChannelTypes: pinnedTaskPluginChannelTypes(c, pluginKey),
 	})
 }
@@ -248,4 +250,38 @@ func pinnedTaskPluginChannelTypes(c *gin.Context, expected string) []int {
 		return nil
 	}
 	return channelTypes
+}
+
+// pinnedTaskPluginKeys returns every task-provider candidate that claimed the
+// same public endpoint/model. This lets distribution choose either provider
+// while preserving the single-plugin filter for ordinary task routes.
+func pinnedTaskPluginKeys(c *gin.Context, expected string) []string {
+	if c == nil || expected == "" {
+		return nil
+	}
+	value, exists := c.Get(jsplugin.ContextKeyPinnedEndpoint)
+	pinned, ok := value.(jsplugin.PinnedEndpoint)
+	if !exists || !ok || pinned.Generation == nil || pinned.Plugin == nil || len(pinned.Candidates) < 2 {
+		return nil
+	}
+	keys := make([]string, 0, len(pinned.Candidates))
+	seen := make(map[string]struct{}, len(pinned.Candidates))
+	expectedFound := false
+	for _, candidate := range pinned.Candidates {
+		if candidate.Plugin == nil || candidate.Plugin.Meta.Key == "" {
+			continue
+		}
+		if candidate.Plugin.Meta.Key == expected {
+			expectedFound = true
+		}
+		if _, duplicate := seen[candidate.Plugin.Meta.Key]; duplicate {
+			continue
+		}
+		seen[candidate.Plugin.Meta.Key] = struct{}{}
+		keys = append(keys, candidate.Plugin.Meta.Key)
+	}
+	if !expectedFound || len(keys) < 2 {
+		return nil
+	}
+	return keys
 }

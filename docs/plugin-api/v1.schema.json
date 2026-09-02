@@ -8,7 +8,7 @@
   "properties": {
     "apiVersion": {"const": 1}, "key": {"type": "string"}, "name": {"type": "string"}, "icon": {"type": "string", "maxLength": 128}, "description": {"$ref": "#/$defs/localizedText"}, "version": {"type": "string"},
     "author": {"type": "object", "required": ["name"], "additionalProperties": false, "properties": {"name": {"type": "string"}, "url": {"type": "string", "format": "uri"}}},
-    "channelTypes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}, "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "channelTypes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}, "sharedModels": {"type": "boolean"}, "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "fetchMode": {"enum": ["per_task", "batch"]}, "allowedHosts": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "protocols": {"type": "array", "uniqueItems": true, "items": {"oneOf": [
       {"enum": ["openai_video"]},

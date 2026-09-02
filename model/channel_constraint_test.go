@@ -57,6 +57,16 @@ func TestFilterCandidateIDs(t *testing.T) {
 			wantKept:  []int{900001},
 		},
 		{
+			name:      "identity keeps any shared task-provider key",
+			ids:       []int{900001, 900002},
+			modelName: "shared",
+			filters: []dto.ChannelFilter{{
+				Kind:           dto.FilterTaskPluginIdentity,
+				TaskPluginKeys: []string{"alpha", "beta"},
+			}},
+			wantKept: []int{900001, 900002},
+		},
+		{
 			name:      "identity empty key drops all type-59",
 			ids:       []int{900001, 900002},
 			modelName: "shared",

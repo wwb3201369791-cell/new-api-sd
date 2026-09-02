@@ -1,28 +1,21 @@
 export const meta = {
   apiVersion: 1,
-  key: "doubao",
-  name: "Doubao Video",
-  icon: "Doubao.Color",
+  key: "runyuan",
+  name: "Runyuan Seedance",
+  icon: "text:MC",
   description: {
-    en: "Volcengine Doubao Seedance video generation (text-to-video, image-to-video, and video-to-video)",
-    zh: "火山引擎豆包 Seedance 视频生成（文生视频、图生视频、视频生视频）",
+    en: "China Runyuan Seedance video generation (text-to-video, image-to-video, and multimodal input)",
+    zh: "润元 Seedance 视频生成（文生视频、图生视频和多模态输入）",
   },
-  version: "1.0.0",
+  version: "1.0.4",
   author: { name: "QuantumNous" },
-  channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
-  // Allow task-provider plugins to share Ark model names while legacy
-  // channelTypes remain selectable through the existing distributor.
+  // Third-party task plugin channels are bound by task_plugin_key. Keep the
+  // public alias documented by Runyuan; channel model_mapping can map it
+  // to a deployment-specific model name when required.
+  // Multiple task-provider plugins may expose this same public model. The
+  // host chooses the configured channel by task_plugin_key.
   sharedModels: true,
-  models: [
-    "doubao-seedance-1-0-pro-250528",
-    "doubao-seedance-1-0-lite-t2v",
-    "doubao-seedance-1-0-lite-i2v",
-    "doubao-seedance-1-5-pro-251215",
-    "doubao-seedance-2-0-260128",
-    "doubao-seedance-2-0-fast-260128",
-    "doubao-seedance-2-0-mini-260615",
-    "doubao-seedance-2-5-260628",
-  ],
+  models: ["doubao-seedance-2.0", "doubao-seedance-2-0-260128"],
   fetchMode: "per_task",
   usageSchema: {
     tokens: {
@@ -34,7 +27,7 @@ export const meta = {
       },
     },
     resolution: {
-      enum: ["480p", "720p", "1080p", "4k"],
+      enum: ["480p", "720p", "1080p"],
       description: {
         en: "Output video resolution; Seedance token unit price varies by resolution tier.",
         zh: "输出视频分辨率；Seedance token 单价随分辨率档位变化。",
@@ -48,25 +41,30 @@ export const meta = {
       },
     },
   },
-  // Official Ark formula tokens = (input + output seconds) × W × H × 24 / 1024,
-  // 16:9 max-pixel sizes, cross-checked against Volcengine price examples.
+  // Runyuan bills Seedance by completion_tokens. The submit estimate is
+  // intentionally conservative; extractUsageOnComplete replaces it with the
+  // usage.completion_tokens value returned by the provider.
   usageExamples: [
     { label: "480p · 5s", facts: { tokens: 48038, resolution: "480p", video_input: "none" } },
     { label: "720p · 5s", facts: { tokens: 108000, resolution: "720p", video_input: "none" } },
     { label: "1080p · 5s", facts: { tokens: 243000, resolution: "1080p", video_input: "none" } },
-    { label: "4k · 5s", facts: { tokens: 972000, resolution: "4k", video_input: "none" } },
     { label: "720p · 10s", facts: { tokens: 216000, resolution: "720p", video_input: "none" } },
     { label: "720p · 5s (+4s 输入视频)", facts: { tokens: 194400, resolution: "720p", video_input: "video" } },
   ],
   routes: [
-    { method: "POST", path: "/doubao/api/v3/contents/generations/tasks", type: "submit", decode: "createTask", render: "taskCreated" },
-    { method: "GET", path: "/doubao/api/v3/contents/generations/tasks/:task_id", type: "query", render: "taskStatus" },
+    { method: "POST", path: "/runyuan/v1/video/tasks", type: "submit", decode: "createTask", render: "taskCreated" },
+    { method: "GET", path: "/runyuan/v1/video/tasks/:task_id", type: "query", render: "taskStatus" },
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
 
 function trimmed(value) {
   return String(value || "").trim();
+}
+
+function normalizeRunyuanModel(value) {
+  const model = trimmed(value);
+  return model === "doubao-seedance-2-0-260128" ? "doubao-seedance-2.0" : model;
 }
 
 function draftTaskIds(content) {
@@ -106,11 +104,10 @@ function rewriteDraftTaskContent(content, originTasks) {
 
 function normalizeResolution(value) {
   const raw = trimmed(value).toLowerCase();
-  if (["480p", "720p", "1080p", "4k"].includes(raw)) return raw;
+  if (["480p", "720p", "1080p"].includes(raw)) return raw;
   const parts = raw.replace("*", "x").split("x");
   if (parts.length !== 2) return "720p";
   const max = Math.max(Number(parts[0]), Number(parts[1]));
-  if (max >= 3840) return "4k";
   if (max >= 1920) return "1080p";
   if (max >= 1280) return "720p";
   return "480p";
@@ -120,14 +117,49 @@ function hasVideo(content) {
   return Array.isArray(content) && content.some((item) => item && (item.type === "video_url" || Object.prototype.hasOwnProperty.call(item, "video_url")));
 }
 
+function contentFromRequest(req) {
+  const metadata = req && req.metadata && typeof req.metadata === "object" && !Array.isArray(req.metadata) ? req.metadata : {};
+  const content = [];
+  if (Array.isArray(metadata.content)) content.push(...metadata.content);
+  if (Array.isArray(req && req.content)) content.push(...req.content);
+  return content;
+}
+
+function validateSeedanceContent(content) {
+  if (!Array.isArray(content)) throw new Error("content must be an array");
+  if (content.length === 0 || content.length > 5) throw new Error("content must contain between 1 and 5 items");
+  for (const item of content) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("content items must be objects");
+    const type = trimmed(item.type);
+    if (!type) throw new Error("content item type is required");
+    if (type === "text") {
+      if (typeof item.text !== "string" || !trimmed(item.text)) throw new Error("text content requires a non-empty text field");
+      continue;
+    }
+    if (["image_url", "video_url", "audio_url"].includes(type)) {
+      const value = item[type];
+      const url = typeof value === "string" ? value : value && typeof value === "object" ? value.url : "";
+      if (!trimmed(url)) throw new Error(type + " content requires a public URL");
+    }
+  }
+  return content;
+}
+
+function validateSeedanceDuration(value) {
+  const seconds = Number(value);
+  if (!Number.isInteger(seconds) || (seconds !== -1 && (seconds <= 0 || seconds > 3600))) {
+    throw new Error("duration must be -1 or an integer between 1 and 3600");
+  }
+  return seconds;
+}
+
 // Max-pixel 16:9 dimensions per resolution tier. Used when ratio is absent or
 // adaptive so the submit-time estimate overestimates rather than underestimates.
-// Official Ark formula: tokens = seconds × width × height × 24 / 1024.
+// Seedance estimate: seconds × width × height × 24 / 1024.
 // Video input duration is omitted; extractUsageOnComplete overlays the real bill.
 function resolutionMaxPixels(resolution) {
   if (resolution === "480p") return [854, 480];
   if (resolution === "1080p") return [1920, 1080];
-  if (resolution === "4k") return [3840, 2160];
   return [1280, 720];
 }
 
@@ -139,18 +171,11 @@ function estimateTokens(seconds, resolution) {
 function videoInputRatio(model, resolution, content) {
   const video = hasVideo(content);
   const res = trimmed(resolution).toLowerCase();
-  if (model === "doubao-seedance-2-5-260628") {
-    if (res === "1080p") return video ? 7.0 / 10.7 : 11.7 / 10.7;
-    return video ? 42 / 70 : 1;
-  }
-  if (model === "doubao-seedance-2-0-260128") {
-    if (res === "1080p") return video ? 31 / 46 : 51 / 46;
-    if (res === "4k") return video ? 16 / 46 : 26 / 46;
-    return video ? 28 / 46 : 1;
-  }
-  if (model === "doubao-seedance-2-0-fast-260128") return video ? 22 / 37 : 1;
-  if (model === "doubao-seedance-2-0-mini-260615") return video ? 14 / 23 : 1;
-  return 1;
+  if (!video) return 1;
+  // Runyuan pricing differentiates only by video input and resolution:
+  // 56/92 for 480p/720p, and 62/102 for 1080p. The ratio is used when a
+  // tiered billing expression models the provider's resource-package units.
+  return res === "1080p" ? 62 / 102 : 56 / 92;
 }
 
 function responsesInput(req) {
@@ -208,6 +233,7 @@ export const native = {
     if (!model) throw new Error("model is required");
     if (body.content !== undefined && !Array.isArray(body.content)) throw new Error("content must be an array");
     const content = Array.isArray(body.content) ? body.content : [];
+    validateSeedanceContent(content);
     const texts = [];
     let hasReference = false;
     for (const item of content) {
@@ -225,8 +251,7 @@ export const native = {
         .join("\n"),
       metadata: body,
     };
-    const seconds = Number(body.duration);
-    if (Number.isFinite(seconds) && seconds > 0) requestBody.seconds = seconds;
+    if (Object.prototype.hasOwnProperty.call(body, "duration")) requestBody.seconds = validateSeedanceDuration(body.duration);
     const intent = { kind: "submit", model: model, action: hasReference ? "image_to_video" : "text_to_video", requestBody: requestBody };
     const originTaskIds = draftTaskIds(content);
     if (originTaskIds.length) intent.originTaskIds = originTaskIds;
@@ -250,21 +275,73 @@ export const native = {
 
 export function buildSubmitRequest(ctx) {
   const req = ctx.requestBody;
-  const metadata = req.metadata || {};
-  const body = Object.assign({ model: req.model || "", content: [] }, metadata);
+  const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
+  if (!baseUrl) throw new Error("baseUrl is required");
+  const metadata = req.metadata && typeof req.metadata === "object" && !Array.isArray(req.metadata) ? req.metadata : {};
+  // Responses requests are normalized into prompt/images/metadata, while the
+  // Ark-compatible endpoint sends the provider's content[] shape directly.
+  // Preserve both forms instead of dropping a direct content array.
+  const body = Object.assign({}, metadata);
+  for (const key of [
+    "content",
+    "duration",
+    "ratio",
+    "resolution",
+    "watermark",
+    "callback_url",
+    "generate_audio",
+    "return_last_frame",
+    "seed",
+    "camera_fixed",
+    "frames",
+    "tools",
+    "safety_identifier",
+    "service_tier",
+    "execution_expires_after",
+    "draft",
+    "priority",
+    "output_format",
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(req, key)) body[key] = req[key];
+  }
+  body.model = req.model || "";
   const imageContent = [];
-  const images = Array.isArray(req.images) ? req.images : [];
-  for (const url of images) imageContent.push({ type: "image_url", image_url: { url: url } });
-  const metadataContent = Array.isArray(body.content) ? body.content : [];
-  body.content = imageContent.concat(metadataContent).filter((item) => item && item.type !== "text");
-  const hasReference = body.content.length > 0;
-  if (trimmed(req.prompt) || !hasReference) body.content.push({ type: "text", text: req.prompt || "" });
+  const images = [];
+  if (Array.isArray(req.images)) images.push(...req.images);
+  for (const value of [req.image, req.input_reference]) {
+    if (trimmed(value) && !images.includes(value)) images.push(value);
+  }
+  for (const url of images) {
+    if (typeof url === "string" && trimmed(url)) imageContent.push({ type: "image_url", image_url: { url: trimmed(url) }, role: "reference_image" });
+  }
+  const directContent = Array.isArray(req.content) ? req.content.slice() : null;
+  const metadataContent = contentFromRequest(req);
+  const hasPrompt = trimmed(req.prompt) !== "";
+  if (directContent) {
+    body.content = directContent;
+    // Add normalized image fields only when the direct content did not carry
+    // the same URL already. This keeps the official content order intact.
+    for (const item of imageContent) {
+      const imageURL = item.image_url && item.image_url.url;
+      const exists = body.content.some((candidate) => candidate && candidate.image_url && candidate.image_url.url === imageURL);
+      if (!exists) body.content.push(item);
+    }
+  } else {
+    body.content = imageContent.concat(metadataContent).filter(function (item) {
+      return item && (!hasPrompt || item.type !== "text");
+    });
+    const hasReference = body.content.some((item) => item && item.type !== "text");
+    if (hasPrompt || (!hasReference && body.content.length === 0)) body.content.push({ type: "text", text: req.prompt || "" });
+  }
+  const hasReference = body.content.some((item) => item && item.type !== "text");
+  validateSeedanceContent(body.content);
   if (Array.isArray(body.content)) body.content = rewriteDraftTaskContent(body.content, ctx.originTasks);
-  const seconds = Number.parseInt(req.seconds || "", 10);
-  if (seconds > 0) body.duration = seconds;
-  body.model = ctx.upstreamModel || body.model;
+  delete body.seconds;
+  const secondsValue = req.seconds === undefined ? req.duration : req.seconds;
+  if (secondsValue !== undefined) body.duration = validateSeedanceDuration(secondsValue);
+  body.model = normalizeRunyuanModel(ctx.upstreamModel || body.model);
   return {
-    url: ctx.baseUrl + "/api/v3/contents/generations/tasks",
+    url: baseUrl + "/v1/video/tasks",
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + ctx.apiKey },
     body: body,
@@ -273,16 +350,37 @@ export function buildSubmitRequest(ctx) {
   };
 }
 
+// Used by the administrator's channel-test action. Runyuan does not publish a
+// model-discovery endpoint; querying a sentinel task id validates the bearer
+// credential without creating a generation task. A documented 404 is treated
+// as healthy by the host when the endpoint responds with an error envelope.
+export function buildChannelTestRequest(ctx) {
+  const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
+  const model = normalizeRunyuanModel(ctx && (ctx.upstreamModel || ctx.model));
+  if (!baseUrl) throw new Error("baseUrl is required");
+  if (!model) throw new Error("model is required");
+  return {
+    url: baseUrl + "/v1/video/tasks/channel-test-nonexistent",
+    method: "GET",
+    headers: { Accept: "application/json", Authorization: "Bearer " + trimmed(ctx && ctx.apiKey) },
+    acceptedStatusCodes: [404],
+    acceptErrorResponse: true,
+  };
+}
+
 export function parseSubmitResponse(ctx, resp) {
-  if (!resp.body || !resp.body.id) throw new Error("task_id is empty");
-  return { taskId: resp.body.id, taskData: resp.body };
+  const body = resp && resp.body && typeof resp.body === "object" ? resp.body : {};
+  const taskId = trimmed(body.task_id || body.id || (body.data && body.data.task_id) || (body.data && body.data.id));
+  if (!taskId) throw new Error("task_id is empty");
+  return { taskId: taskId, taskData: body };
 }
 
 export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
-  const metadata = req.metadata || {};
+  const metadata = req.metadata && typeof req.metadata === "object" && !Array.isArray(req.metadata) ? req.metadata : {};
+  const requestContent = contentFromRequest(req);
   if (ctx.usagePurpose === "billing_ratios") {
-    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution, metadata.content);
+    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution || req.resolution || req.size, requestContent);
     return ratio === 1 ? null : { video_input_ratio: ratio };
   }
   let seconds = Number(req.seconds || req.duration || metadata.duration || 0);
@@ -292,20 +390,24 @@ export function extractUsage(ctx) {
   }
   if (seconds <= 0) seconds = 5;
   seconds = Math.min(seconds, 3600);
-  const rawResolution = metadata.resolution || req.size;
+  const rawResolution = metadata.resolution || req.resolution || req.size;
   const raw = trimmed(rawResolution).toLowerCase();
-  const recognized = ["480p", "720p", "1080p", "4k"].includes(raw) || raw.replace("*", "x").split("x").length === 2;
+  const recognized = ["480p", "720p", "1080p"].includes(raw) || raw.replace("*", "x").split("x").length === 2;
   const resolution = recognized ? normalizeResolution(rawResolution) : "1080p";
   return {
     tokens: estimateTokens(seconds, resolution),
     resolution: resolution,
-    video_input: hasVideo(metadata.content) ? "video" : "none",
+    video_input: hasVideo(requestContent) ? "video" : "none",
   };
 }
 
 export function buildQueryRequest(ctx) {
+  const baseUrl = trimmed(ctx && ctx.baseUrl).replace(/\/+$/, "");
+  if (!baseUrl) throw new Error("baseUrl is required");
+  const taskId = trimmed(ctx && ctx.taskId);
+  if (!taskId) throw new Error("taskId is required");
   return {
-    url: ctx.baseUrl + "/api/v3/contents/generations/tasks/" + ctx.taskId,
+    url: baseUrl + "/v1/video/tasks/" + encodeURIComponent(taskId),
     method: "GET",
     headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + ctx.apiKey },
   };
@@ -350,7 +452,10 @@ export function buildContentRequest(ctx) {
   const urls = { video: content.video_url, last_frame: content.last_frame_url };
   const url = trimmed(urls[ctx.artifactKey]);
   if (!url) throw new Error("artifact_not_found");
-  return { url: url, method: ctx.clientRequest.method, credentialless: true };
+  // Runyuan's CDN serves media with GET but does not implement HEAD.
+  // The host still suppresses the response body for an incoming HEAD request,
+  // so always use GET upstream while preserving OpenAI HEAD semantics.
+  return { url: url, method: "GET", credentialless: true };
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
@@ -362,7 +467,7 @@ export function extractUsageOnComplete(task, taskResult, body) {
   if (Number.isFinite(tokens) && tokens > 0) facts.tokens = tokens;
   const content = body.content || {};
   const resolution = trimmed(content.resolution || body.resolution).toLowerCase();
-  if (["480p", "720p", "1080p", "4k"].includes(resolution)) facts.resolution = resolution;
+  if (["480p", "720p", "1080p"].includes(resolution)) facts.resolution = resolution;
   return facts;
 }
 
@@ -390,9 +495,12 @@ export const protocols = {
       else if (req.size && !metadata.resolution) metadata.resolution = normalizeResolution(req.size);
       const requestBody = { model: model, prompt: prompt, metadata: metadata };
       if (images.length) requestBody.images = images;
-      if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = req.seconds;
-      else if (Object.prototype.hasOwnProperty.call(req, "duration")) requestBody.seconds = req.duration;
+      if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = validateSeedanceDuration(req.seconds);
+      else if (Object.prototype.hasOwnProperty.call(req, "duration")) requestBody.seconds = validateSeedanceDuration(req.duration);
       if (Object.prototype.hasOwnProperty.call(req, "size")) requestBody.size = req.size;
+      for (const key of ["generate_audio", "ratio", "watermark"]) {
+        if (Object.prototype.hasOwnProperty.call(req, key)) requestBody[key] = req[key];
+      }
       const intent = { kind: "submit", model: model, action: images.length ? "image_to_video" : "text_to_video", requestBody: requestBody };
       const originTaskIds = draftTaskIds(metadata.content);
       if (originTaskIds.length) intent.originTaskIds = originTaskIds;
@@ -425,7 +533,7 @@ export const protocols = {
             content: [{ type: "output_text", text: responsesVideoText(ctx), annotations: [], logprobs: [] }],
           },
         ],
-        metadata: { vendor: "doubao" },
+        metadata: { vendor: "runyuan" },
       };
     },
   },
@@ -444,7 +552,12 @@ const legacyRenderers = {
       created_at: task.created_at,
       completed_at: task.updated_at,
     };
-    if (data.status === "failed") output.error = { message: data.error ? data.error.message || "" : "", code: data.error ? data.error.code || "" : "" };
+    if (data.status === "failed" || data.status === "cancelled") {
+      output.error = {
+        message: data.error ? data.error.message || "" : data.status === "cancelled" ? "cancelled" : "",
+        code: data.error ? data.error.code || "" : data.status === "cancelled" ? "task_cancelled" : "",
+      };
+    }
     return output;
   },
 };
@@ -455,13 +568,18 @@ protocols.openai_video = {
     if (ctx.body.kind === "json") {
       if (!ctx.body.value || Array.isArray(ctx.body.value)) throw new Error("JSON object required");
       const req = ctx.body.value;
+      const isArkPath = String(ctx.path || "").includes("/v1/video/tasks");
+      if (isArkPath && (!Array.isArray(req.content) || req.content.length === 0)) throw new Error("content must be a non-empty array");
+      if (Array.isArray(req.content) && req.content.length > 5) throw new Error("content must contain at most 5 items");
+      if (isArkPath) validateSeedanceContent(req.content);
       const seconds = req.seconds === undefined ? req.duration : req.seconds;
-      if (seconds !== undefined && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
-        throw new Error("seconds must be between 1 and 3600");
+      if (seconds !== undefined) validateSeedanceDuration(seconds);
+      const content = Array.isArray(req.content) ? req.content : [];
+      const hasReference = content.some((item) => item && typeof item === "object" && item.type !== "text") || req.input_reference || req.image;
       return {
         kind: "submit",
         model: ctx.model,
-        action: req.input_reference || req.image ? "image_to_video" : "text_to_video",
+        action: hasReference ? "image_to_video" : "text_to_video",
         requestBody: Object.assign({}, req, { model: ctx.model }),
       };
     }
@@ -485,12 +603,11 @@ protocols.openai_video = {
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("metadata must be a JSON object string");
       req.metadata = parsed;
     }
-    if ((ctx.body.files || []).length) throw new Error("Doubao requires image and video references to be URLs inside metadata.content");
+    if ((ctx.body.files || []).length) throw new Error("Runyuan requires image and video references to be public URLs inside metadata.content");
     if (req.seconds !== undefined) req.seconds = Number(req.seconds);
     else if (req.duration !== undefined) req.seconds = Number(req.duration);
     const seconds = req.seconds === undefined ? req.duration : req.seconds;
-    if (seconds !== undefined && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
-      throw new Error("seconds must be between 1 and 3600");
+    if (seconds !== undefined) req.seconds = validateSeedanceDuration(seconds);
     return {
       kind: "submit",
       model: ctx.model,

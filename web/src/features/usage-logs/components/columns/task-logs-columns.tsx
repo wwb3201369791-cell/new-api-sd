@@ -70,6 +70,22 @@ function TaskDetailsCell(props: {
             {props.log.fail_reason}
           </span>
         ) : null}
+        {props.isAdmin && props.log.admin_info?.request_id ? (
+          <span
+            className='text-muted-foreground max-w-full truncate font-mono text-[11px]'
+            title={props.log.admin_info.request_id}
+          >
+            {t('Request ID')}: {props.log.admin_info.request_id}
+          </span>
+        ) : null}
+        {props.isRoot && props.log.root_info?.upstream_task_id ? (
+          <span
+            className='text-muted-foreground max-w-full truncate font-mono text-[11px]'
+            title={props.log.root_info.upstream_task_id}
+          >
+            {t('Upstream Task ID')}: {props.log.root_info.upstream_task_id}
+          </span>
+        ) : null}
       </div>
       <TaskDetailsDialog
         log={props.log}

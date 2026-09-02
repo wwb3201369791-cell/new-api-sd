@@ -33,6 +33,8 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		{"GET", "/doubao/api/v3/contents/generations/tasks/:task_id", "doubao", jsplugin.RouteTypeQuery, "", "taskStatus"},
 		{"POST", "/mobilecloud/api/v3/contents/generations/tasks", "mobilecloud", jsplugin.RouteTypeSubmit, "", "taskCreated"},
 		{"GET", "/mobilecloud/api/v3/contents/generations/tasks/:task_id", "mobilecloud", jsplugin.RouteTypeQuery, "", "taskStatus"},
+		{"POST", "/runyuan/v1/video/tasks", "runyuan", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"GET", "/runyuan/v1/video/tasks/:task_id", "runyuan", jsplugin.RouteTypeQuery, "", "taskStatus"},
 	}
 	for _, expected := range routes {
 		t.Run(expected.method+" "+expected.path, func(t *testing.T) {
@@ -65,7 +67,7 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 }
 
 func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
-	expectedKeys := []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "mobilecloud", "sora", "sunoapi", "vertex-ai", "vidu"}
+	expectedKeys := []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "mobilecloud", "runyuan", "sora", "sunoapi", "vertex-ai", "vidu"}
 	generation := jsplugin.DefaultRegistry.Generation()
 	require.NotNil(t, generation)
 

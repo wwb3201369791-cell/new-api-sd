@@ -67,6 +67,53 @@ func TestPinnedTaskPluginChannelTypesIncludesSharedEndpointProviders(t *testing.
 	assert.Equal(t, []int{constant.ChannelTypeGemini, constant.ChannelTypeVertexAi}, pinnedTaskPluginChannelTypes(c, candidates[0].Plugin.Meta.Key))
 }
 
+func TestPinnedTaskPluginKeysIncludesSharedTaskProviders(t *testing.T) {
+	registry := jsplugin.NewRegistry()
+	left, err := registry.Register(sharedTaskProviderSource("task-a"), jsplugin.Options{})
+	require.NoError(t, err)
+	_, err = registry.Register(sharedTaskProviderSource("task-b"), jsplugin.Options{})
+	require.NoError(t, err)
+	candidates := registry.Generation().LookupEndpointCandidates("POST", "/v1/responses", "task-model")
+	require.Len(t, candidates, 2)
+
+	c, _ := gin.CreateTestContext(nil)
+	c.Set(jsplugin.ContextKeyPinnedEndpoint, jsplugin.PinnedEndpoint{
+		Generation: registry.Generation(),
+		Plugin:     left,
+		Protocol:   candidates[0].Protocol,
+		Operation:  candidates[0].Operation,
+		Model:      "task-model",
+		Candidates: candidates,
+	})
+	keys := pinnedTaskPluginKeys(c, "task-a")
+	assert.Equal(t, []string{"task-a", "task-b"}, keys)
+}
+
+func sharedTaskProviderSource(key string) string {
+	return fmt.Sprintf(`
+export const meta = {
+  apiVersion: 1,
+  key: %q,
+  name: %q,
+  version: "1.0.0",
+  author: {name: "Test"},
+  sharedModels: true,
+  models: ["task-model"],
+  fetchMode: "per_task",
+  protocols: [{name: "openai_responses", supports: ["stream", "sync", "background"]}],
+};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {taskId: "task"}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+export const protocols = {openai_responses: {
+  decodeRequest: function(ctx) { return {kind: "submit", model: "task-model", requestBody: ctx.body.value}; },
+  renderEvents: function() { return {events: [], state: null, done: false}; },
+  renderFinal: function() { return {output: []}; },
+}};
+`, key, key)
+}
+
 func channelSelectTaskPluginSource(key string, channelType int) string {
 	return fmt.Sprintf(`
 export const meta = {

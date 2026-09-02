@@ -73,6 +73,45 @@ export function buildChannelTestRequest(ctx) {
 	assert.Equal(t, "fixture-model", gotModel)
 }
 
+func TestTaskPluginChannelTestAcceptsDocumentedSentinelStatus(t *testing.T) {
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"task not found"}}`))
+	}))
+	defer upstream.Close()
+
+	const pluginKey = "channel-test-sentinel"
+	source := `
+export const meta = { apiVersion: 1, key: "channel-test-sentinel", name: "Channel Test Sentinel", version: "1.0.0", author: {name: "Test"}, models: ["fixture-model"], fetchMode: "per_task" };
+export function buildSubmitRequest() { return {url: "https://example.com/submit"}; }
+export function parseSubmitResponse() { return {taskId: "task"}; }
+export function buildQueryRequest() { return {url: "https://example.com/query"}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+export function buildChannelTestRequest(ctx) {
+  return {url: ctx.baseUrl + "/v1/video/tasks/sentinel", method: "GET", headers: {"Authorization": "Bearer " + ctx.apiKey}, acceptedStatusCodes: [404], acceptErrorResponse: true};
+}
+`
+	_, err := pluginruntime.DefaultRegistry.Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pluginruntime.DefaultRegistry.Unregister(pluginKey) })
+
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeTaskPlugin,
+		Name:    "sentinel",
+		Key:     "fixture-key",
+		Models:  "fixture-model",
+		BaseURL: common.GetPointer(upstream.URL),
+		Setting: common.GetPointer(`{"task_plugin_key":"` + pluginKey + `"}`),
+	}
+	result := testTaskPluginChannel(context.Background(), channel, 7, "fixture-model")
+	require.NoError(t, result.localErr)
+	assert.Nil(t, result.newAPIError)
+	assert.Equal(t, "/v1/video/tasks/sentinel", gotPath)
+}
+
 func TestTaskPluginChannelTestRejectsMissingPreflightHook(t *testing.T) {
 	const pluginKey = "channel-test-no-hook"
 	source := `

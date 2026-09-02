@@ -78,6 +78,23 @@ func TestRegistryIndexesSharedEndpointCandidatesForDistinctLegacyProviders(t *te
 	assert.Empty(t, registry.RoutingErrors())
 }
 
+func TestRegistryIndexesSharedEndpointCandidatesForTaskProviders(t *testing.T) {
+	registry := NewRegistry()
+	left := mustCompileRoutingPlugin(t, "task-provider-a", 0, `["shared-task-model"]`,
+		`sharedModels: true, protocols: [{name: "openai_responses", supports: ["stream", "sync", "background"]}],`,
+		routingProtocolExport("openai_responses"))
+	right := mustCompileRoutingPlugin(t, "task-provider-b", 0, `["shared-task-model"]`,
+		`sharedModels: true, protocols: [{name: "openai_responses", supports: ["stream", "sync", "background"]}],`,
+		routingProtocolExport("openai_responses"))
+
+	require.NoError(t, registry.ReplaceOverrides([]*LoadedPlugin{right, left}))
+	candidates := registry.Generation().LookupEndpointCandidates("POST", "/v1/responses", "shared-task-model")
+	require.Len(t, candidates, 2)
+	assert.Equal(t, "task-provider-a", candidates[0].Plugin.Meta.Key)
+	assert.Equal(t, "task-provider-b", candidates[1].Plugin.Meta.Key)
+	assert.Empty(t, registry.RoutingErrors())
+}
+
 func TestSupportsRegisteredHostProtocols(t *testing.T) {
 	assert.True(t, SupportsHostProtocol("openai_responses"))
 	assert.True(t, SupportsHostProtocol("openai_video"))

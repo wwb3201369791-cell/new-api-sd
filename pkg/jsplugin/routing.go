@@ -943,7 +943,8 @@ func buildRoutingGenerationFromPlugins(effective map[string]*LoadedPlugin, numbe
 						if len(bindings) > 0 {
 							other := bindings[0]
 							legacyProviders := len(plugin.Meta.ChannelTypes) > 0 && len(other.Plugin.Meta.ChannelTypes) > 0
-							if !legacyProviders || claim.Name != other.Protocol {
+							sharedTaskProviders := plugin.Meta.SharedModels && other.Plugin.Meta.SharedModels && claim.Name == other.Protocol
+							if (!legacyProviders && !sharedTaskProviders) || claim.Name != other.Protocol {
 								return nil, fmt.Errorf("plugin %s protocol %s %s model %q conflicts with plugin %s", plugin.Meta.Key, method, operation.Path, model, other.Plugin.Meta.Key)
 							}
 						}

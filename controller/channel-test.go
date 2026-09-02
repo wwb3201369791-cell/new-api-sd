@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,10 +47,19 @@ type testResult struct {
 // used by the optional buildChannelTestRequest plugin hook.  Channel tests
 // must validate credentials and routing without submitting a billable task.
 type taskPluginChannelTestRequest struct {
-	URL     string            `json:"url"`
-	Method  string            `json:"method"`
-	Headers map[string]string `json:"headers"`
-	Body    any               `json:"body"`
+	URL                 string            `json:"url"`
+	Method              string            `json:"method"`
+	Headers             map[string]string `json:"headers"`
+	Body                any               `json:"body"`
+	AcceptedStatusCodes []int             `json:"acceptedStatusCodes"`
+	AcceptErrorResponse bool              `json:"acceptErrorResponse"`
+}
+
+func taskPluginPreflightStatusAccepted(status int, accepted []int) bool {
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		return true
+	}
+	return slices.Contains(accepted, status)
 }
 
 // testTaskPluginChannel executes a plugin-provided, non-billing preflight
@@ -200,7 +210,8 @@ func testTaskPluginChannel(ctx context.Context, channel *model.Channel, testUser
 	if len(responseBody) > maxPreflightResponseBytes {
 		responseBody = responseBody[:maxPreflightResponseBytes]
 	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	statusAccepted := taskPluginPreflightStatusAccepted(resp.StatusCode, descriptor.AcceptedStatusCodes)
+	if !statusAccepted {
 		requestErr := fmt.Errorf("task plugin preflight returned HTTP %d", resp.StatusCode)
 		if message := detectErrorMessageFromJSONBytes(responseBody); message != "" {
 			requestErr = fmt.Errorf("%w: %s", requestErr, message)
@@ -208,6 +219,9 @@ func testTaskPluginChannel(ctx context.Context, channel *model.Channel, testUser
 		return failure(requestErr, types.ErrorCodeBadResponse, resp.StatusCode)
 	}
 	if message := detectErrorMessageFromJSONBytes(responseBody); message != "" {
+		if descriptor.AcceptErrorResponse && statusAccepted {
+			return testResult{context: c}
+		}
 		return failure(fmt.Errorf("task plugin preflight returned error: %s", message), types.ErrorCodeBadResponse, http.StatusBadGateway)
 	}
 	return testResult{context: c}
