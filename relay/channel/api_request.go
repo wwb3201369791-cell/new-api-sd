@@ -554,8 +554,15 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
-	_ = req.Body.Close()
-	_ = c.Request.Body.Close()
+	// DELETE/control requests commonly have no body.  Closing a nil
+	// http.Request.Body panics after a successful upstream response, which
+	// turns an otherwise valid task cancellation/deletion into HTTP 500.
+	if req != nil && req.Body != nil {
+		_ = req.Body.Close()
+	}
+	if c != nil && c.Request != nil && c.Request.Body != nil {
+		_ = c.Request.Body.Close()
+	}
 	return resp, nil
 }
 
