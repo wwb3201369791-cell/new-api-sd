@@ -256,7 +256,10 @@ func SetApiRouter(router *gin.Engine) {
 		// upstream can fetch them after asynchronous asset registration.
 		apiRouter.GET("/mobilecloud/uploads/:object_key", controller.ServeMobileCloudAsset)
 		mobileCloudAssetRoute := apiRouter.Group("/mobilecloud")
-		mobileCloudAssetRoute.Use(middleware.UserAuth())
+		// Asset management is part of the provider-neutral API surface.  Accept
+		// both dashboard sessions and customer API tokens so clients can manage
+		// assets with the same credential they use for video generation.
+		mobileCloudAssetRoute.Use(middleware.TokenOrUserAuth())
 		{
 			mobileCloudAssetRoute.GET("/storage", controller.GetMobileCloudAssetStorage)
 			mobileCloudAssetRoute.POST("/uploads", controller.UploadMobileCloudAsset)
