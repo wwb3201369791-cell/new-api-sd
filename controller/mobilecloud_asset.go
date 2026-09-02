@@ -306,7 +306,7 @@ func mobileCloudAssetClient(c *gin.Context) (*mobilecloudasset.Client, *model.Ch
 				continue
 			}
 			setting := candidate.GetSetting()
-			if strings.EqualFold(strings.TrimSpace(setting.TaskPluginKey), "mobilecloud") && strings.TrimSpace(setting.AssetAccessKey) != "" && strings.TrimSpace(setting.AssetSecretKey) != "" {
+			if strings.EqualFold(strings.TrimSpace(setting.TaskPluginKey), "mobilecloud") && setting.MobileCloudAssetLibraryEnabled() {
 				channel = candidate
 				break
 			}
@@ -324,6 +324,9 @@ func mobileCloudAssetClient(c *gin.Context) (*mobilecloudasset.Client, *model.Ch
 	setting := channel.GetSetting()
 	if !strings.EqualFold(strings.TrimSpace(setting.TaskPluginKey), "mobilecloud") {
 		return nil, nil, errors.New("selected channel is not a Mobile Cloud task plugin channel")
+	}
+	if !setting.MobileCloudAssetLibraryEnabled() {
+		return nil, nil, errors.New("Mobile Cloud asset library is disabled or its credentials are incomplete")
 	}
 	client, err := mobilecloudasset.NewClient(mobilecloudasset.Config{
 		BaseURL: setting.AssetBaseURL, AccessKey: setting.AssetAccessKey, SecretKey: setting.AssetSecretKey,

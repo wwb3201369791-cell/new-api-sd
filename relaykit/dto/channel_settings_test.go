@@ -642,3 +642,35 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http2_connection_shards")
 }
+
+func TestChannelSettingsMobileCloudAssetToggle(t *testing.T) {
+	legacy := ChannelSettings{AssetAccessKey: "ak", AssetSecretKey: "sk"}
+	assert.True(t, legacy.MobileCloudAssetLibraryEnabled())
+	require.NoError(t, legacy.ValidateMobileCloudAssets())
+
+	disabled := false
+	settings := ChannelSettings{
+		AssetEnabled:   &disabled,
+		AssetAccessKey: "ak",
+		AssetSecretKey: "sk",
+		AssetBaseURL:   "https://ecloud.10086.cn",
+	}
+	assert.False(t, settings.MobileCloudAssetLibraryEnabled())
+	require.NoError(t, settings.ValidateMobileCloudAssets())
+
+	enabled := true
+	settings.AssetEnabled = &enabled
+	assert.True(t, settings.MobileCloudAssetLibraryEnabled())
+	require.NoError(t, settings.ValidateMobileCloudAssets())
+
+	settings.AssetSecretKey = ""
+	err := settings.ValidateMobileCloudAssets()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "asset_secret_key")
+
+	settings.AssetSecretKey = "sk"
+	settings.AssetBaseURL = "not-a-url"
+	err = settings.ValidateMobileCloudAssets()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "asset_base_url")
+}

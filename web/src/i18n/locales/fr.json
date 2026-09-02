@@ -5537,6 +5537,24 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Mobile Cloud asset library": "Mobile Cloud asset library",
+    "Optional asset management for Mobile Cloud. Video generation continues to use the channel API key.": "Optional asset management for Mobile Cloud. Video generation continues to use the channel API key.",
+    "Enable Mobile Cloud asset library": "Enable Mobile Cloud asset library",
+    "Turn this off to keep the credentials but prevent asset-management requests.": "Turn this off to keep the credentials but prevent asset-management requests.",
+    "Asset API base URL": "Asset API base URL",
+    "Leave empty to use the Mobile Cloud default endpoint.": "Leave empty to use the Mobile Cloud default endpoint.",
+    "Asset resource pool": "Asset resource pool",
+    "Leave empty to use CIDC-CORE-00.": "Leave empty to use CIDC-CORE-00.",
+    "Asset Access Key": "Asset Access Key",
+    "Asset Secret Key": "Asset Secret Key",
+    "Configured — leave empty to keep the current value": "Configured — leave empty to keep the current value",
+    "Enter Asset Access Key": "Enter Asset Access Key",
+    "Enter Asset Secret Key": "Enter Asset Secret Key",
+    "Separate credential used only for Mobile Cloud asset APIs.": "Separate credential used only for Mobile Cloud asset APIs.",
+    "The secret is never populated into the form; an empty field keeps the saved value.": "The secret is never populated into the form; an empty field keeps the saved value.",
+    "Asset base URL must be an absolute HTTP(S) URL": "Asset base URL must be an absolute HTTP(S) URL",
+    "Asset Access Key is required when the Mobile Cloud asset library is enabled": "Asset Access Key is required when the Mobile Cloud asset library is enabled",
+    "Asset Secret Key is required when the Mobile Cloud asset library is enabled": "Asset Secret Key is required when the Mobile Cloud asset library is enabled"
   }
 }

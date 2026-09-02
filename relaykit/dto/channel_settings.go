@@ -15,6 +15,10 @@ type ChannelSettings struct {
 	// Mobile Cloud asset OpenAPI credentials are kept separate from the task
 	// generation Bearer key (Channel.Key). They are optional and only used by
 	// the asset-management API.
+	// AssetEnabled is a pointer so older channel settings (which predate the
+	// toggle) remain enabled when credentials are present, while an explicit
+	// false value can disable the asset library without deleting credentials.
+	AssetEnabled           *bool  `json:"asset_enabled,omitempty"`
 	AssetBaseURL           string `json:"asset_base_url,omitempty"`
 	AssetAccessKey         string `json:"asset_access_key,omitempty"`
 	AssetSecretKey         string `json:"asset_secret_key,omitempty"`
@@ -31,6 +35,43 @@ type ChannelSettings struct {
 	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+}
+
+// MobileCloudAssetLibraryEnabled reports whether the optional Mobile Cloud
+// asset library may be used for this channel. A missing toggle preserves the
+// pre-Phase-0 behavior for existing channels that already have credentials.
+func (s *ChannelSettings) MobileCloudAssetLibraryEnabled() bool {
+	if s == nil {
+		return false
+	}
+	if s.AssetEnabled != nil {
+		return *s.AssetEnabled && strings.TrimSpace(s.AssetAccessKey) != "" && strings.TrimSpace(s.AssetSecretKey) != ""
+	}
+	return strings.TrimSpace(s.AssetAccessKey) != "" && strings.TrimSpace(s.AssetSecretKey) != ""
+}
+
+// ValidateMobileCloudAssets validates the optional Mobile Cloud asset
+// settings at channel-save time. Disabled libraries are allowed to retain
+// credentials so operators can turn the feature back on later.
+func (s *ChannelSettings) ValidateMobileCloudAssets() error {
+	if s == nil {
+		return nil
+	}
+	enabled := s.AssetEnabled != nil && *s.AssetEnabled
+	legacyConfigured := s.AssetEnabled == nil && (strings.TrimSpace(s.AssetAccessKey) != "" || strings.TrimSpace(s.AssetSecretKey) != "")
+	if !enabled && !legacyConfigured {
+		return nil
+	}
+	if strings.TrimSpace(s.AssetAccessKey) == "" || strings.TrimSpace(s.AssetSecretKey) == "" {
+		return fmt.Errorf("asset_access_key and asset_secret_key are required when the Mobile Cloud asset library is enabled")
+	}
+	if strings.TrimSpace(s.AssetBaseURL) != "" {
+		parsed, err := url.Parse(strings.TrimSpace(s.AssetBaseURL))
+		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("invalid asset_base_url: must be an absolute HTTP(S) URL")
+		}
+	}
+	return nil
 }
 
 const (

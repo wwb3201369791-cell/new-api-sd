@@ -74,6 +74,25 @@ function isOptionalProxyURL(value: string | undefined): boolean {
   }
 }
 
+function isOptionalHTTPURL(value: string | undefined): boolean {
+  const trimmedValue = value?.trim() || ''
+  if (!trimmedValue) return true
+
+  try {
+    const parsedURL = new URL(trimmedValue)
+    return (
+      (parsedURL.protocol === 'http:' || parsedURL.protocol === 'https:') &&
+      Boolean(parsedURL.hostname) &&
+      !parsedURL.username &&
+      !parsedURL.password &&
+      !parsedURL.search &&
+      !parsedURL.hash
+    )
+  } catch {
+    return false
+  }
+}
+
 export const HTTP_PROTOCOL_AUTO = 'auto'
 export const HTTP_PROTOCOL_HTTP1 = 'http1'
 export const MAX_HTTP2_CONNECTION_SHARDS = 8
@@ -255,6 +274,14 @@ export const channelFormSchema = z
     batch_add_set_key_prefix_2_name: z.boolean().optional(),
     key_mode: z.enum(['append', 'replace']).optional(), // For editing multi-key channels
     // Channel extra settings (stored in setting JSON, not sent directly)
+    asset_enabled: z.boolean().optional(),
+    asset_base_url: z
+      .string()
+      .optional()
+      .refine(isOptionalHTTPURL, 'Asset base URL must be an absolute HTTP(S) URL'),
+    asset_access_key: z.string().optional(),
+    asset_secret_key: z.string().optional(),
+    asset_resource_pool: z.string().optional(),
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
     proxy: z
@@ -303,6 +330,42 @@ export const channelFormSchema = z
       !data.task_plugin_key?.trim()
     ) {
       addRequiredIssue(ctx, 'task_plugin_key', 'Task plugin is required')
+    }
+
+    if (
+      data.type === CHANNEL_TYPE_TASK_PLUGIN &&
+      data.task_plugin_key?.trim().toLowerCase() === 'mobilecloud' &&
+      data.asset_enabled === true
+    ) {
+      let existingAssetSettings: Record<string, unknown> = {}
+      if (data.setting?.trim()) {
+        try {
+          const parsed = JSON.parse(data.setting)
+          if (isJsonObjectValue(parsed)) existingAssetSettings = parsed
+        } catch {
+          // The setting JSON validator reports the malformed input separately.
+        }
+      }
+      const hasAccessKey = Boolean(
+        data.asset_access_key?.trim() || existingAssetSettings.asset_access_key
+      )
+      const hasSecretKey = Boolean(
+        data.asset_secret_key?.trim() || existingAssetSettings.asset_secret_key
+      )
+      if (!hasAccessKey) {
+        addRequiredIssue(
+          ctx,
+          'asset_access_key',
+          'Asset Access Key is required when the Mobile Cloud asset library is enabled'
+        )
+      }
+      if (!hasSecretKey) {
+        addRequiredIssue(
+          ctx,
+          'asset_secret_key',
+          'Asset Secret Key is required when the Mobile Cloud asset library is enabled'
+        )
+      }
     }
 
     if (data.type === CHANNEL_TYPE_ADVANCED_CUSTOM) {
@@ -439,6 +502,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   batch_add_set_key_prefix_2_name: false,
   key_mode: 'append',
   // Channel extra settings
+  asset_enabled: false,
+  asset_base_url: '',
+  asset_access_key: '',
+  asset_secret_key: '',
+  asset_resource_pool: '',
   force_format: false,
   thinking_to_content: false,
   proxy: '',
@@ -480,6 +548,11 @@ export function transformChannelToFormDefaults(
   // Parse channel extra settings from setting field
   let extraSettings = {
     task_plugin_key: '',
+    asset_enabled: false,
+    asset_base_url: '',
+    asset_access_key: '',
+    asset_secret_key: '',
+    asset_resource_pool: '',
     force_format: false,
     thinking_to_content: false,
     proxy: '',
@@ -497,8 +570,25 @@ export function transformChannelToFormDefaults(
       const shards = normalizeHttp2ConnectionShards(
         parsed.http2_connection_shards
       )
+      const hasAssetCredentials =
+        typeof parsed.asset_access_key === 'string' &&
+        parsed.asset_access_key.trim() !== '' &&
+        typeof parsed.asset_secret_key === 'string' &&
+        parsed.asset_secret_key.trim() !== ''
       extraSettings = {
         task_plugin_key: parsed.task_plugin_key || '',
+        // Older channels had no toggle; infer enabled from configured
+        // credentials so editing them does not unexpectedly disable assets.
+        asset_enabled:
+          typeof parsed.asset_enabled === 'boolean'
+            ? parsed.asset_enabled
+            : hasAssetCredentials,
+        asset_base_url: parsed.asset_base_url || '',
+        // Secrets are never copied into editable form controls. buildSettingJSON
+        // preserves them from the original setting JSON when the fields stay blank.
+        asset_access_key: '',
+        asset_secret_key: '',
+        asset_resource_pool: parsed.asset_resource_pool || '',
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
@@ -617,17 +707,59 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 export function buildSettingJSON(formData: ChannelFormValues): string {
-  const settingObj: Record<string, unknown> = {
-    task_plugin_key:
-      formData.type === CHANNEL_TYPE_TASK_PLUGIN
-        ? formData.task_plugin_key?.trim() || ''
-        : undefined,
-    force_format: formData.force_format || false,
-    thinking_to_content: formData.thinking_to_content || false,
-    proxy: formData.proxy?.trim() || '',
-    pass_through_body_enabled: formData.pass_through_body_enabled || false,
-    system_prompt: formData.system_prompt || '',
-    system_prompt_override: formData.system_prompt_override || false,
+  let settingObj: Record<string, unknown> = {}
+  if (formData.setting?.trim()) {
+    try {
+      const parsed = JSON.parse(formData.setting)
+      if (isJsonObjectValue(parsed)) {
+        settingObj = { ...parsed }
+      }
+    } catch {
+      // The form schema reports malformed JSON; start clean so a corrected
+      // submission can still be saved without throwing here.
+    }
+  }
+
+  if (formData.type === CHANNEL_TYPE_TASK_PLUGIN) {
+    settingObj.task_plugin_key = formData.task_plugin_key?.trim() || ''
+  } else {
+    delete settingObj.task_plugin_key
+  }
+
+  settingObj.force_format = formData.force_format || false
+  settingObj.thinking_to_content = formData.thinking_to_content || false
+  settingObj.proxy = formData.proxy?.trim() || ''
+  settingObj.pass_through_body_enabled =
+    formData.pass_through_body_enabled || false
+  settingObj.system_prompt = formData.system_prompt || ''
+  settingObj.system_prompt_override = formData.system_prompt_override || false
+
+  if (
+    formData.type === CHANNEL_TYPE_TASK_PLUGIN &&
+    formData.task_plugin_key?.trim().toLowerCase() === 'mobilecloud'
+  ) {
+    settingObj.asset_enabled = formData.asset_enabled === true
+
+    const assetBaseURL = formData.asset_base_url?.trim() || ''
+    if (assetBaseURL) settingObj.asset_base_url = assetBaseURL
+    else delete settingObj.asset_base_url
+
+    // Empty credential inputs mean "keep the existing value" while editing.
+    // This avoids exposing or accidentally clearing provider secrets.
+    const assetAccessKey = formData.asset_access_key?.trim() || ''
+    if (assetAccessKey) settingObj.asset_access_key = assetAccessKey
+    const assetSecretKey = formData.asset_secret_key?.trim() || ''
+    if (assetSecretKey) settingObj.asset_secret_key = assetSecretKey
+
+    const assetResourcePool = formData.asset_resource_pool?.trim() || ''
+    if (assetResourcePool) settingObj.asset_resource_pool = assetResourcePool
+    else delete settingObj.asset_resource_pool
+  } else {
+    delete settingObj.asset_enabled
+    delete settingObj.asset_base_url
+    delete settingObj.asset_access_key
+    delete settingObj.asset_secret_key
+    delete settingObj.asset_resource_pool
   }
 
   const protocol = normalizeHttpProtocol(formData.http_protocol)

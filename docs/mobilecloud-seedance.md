@@ -22,17 +22,23 @@ Compare-And-Swap 更新本地任务并执行一次额度退款，避免轮询器
 1. 任务插件选择 `Mobile Cloud Seedance`，模型选择 `doubao-seedance-2.0`。
 2. 基础 URL 填移动云模型服务区域地址，例如 `https://zhenze-huhehaote.cmecloud.cn`，不要追加 `/api/v3`。
 3. API 密钥填写移动云模型服务的 `MAAS_API_KEY`（Bearer key）。
-4. 如需素材库，在渠道高级设置的 JSON 中增加：
+4. 如需素材库，在渠道高级设置 → 移动云素材库中启用开关并填写凭证。
+   需要通过接口或脚本写入时，对应的 `setting` JSON 为：
 
 ```json
 {
   "task_plugin_key": "mobilecloud",
+  "asset_enabled": true,
   "asset_base_url": "https://ecloud.10086.cn",
   "asset_access_key": "ACCESS_KEY",
   "asset_secret_key": "SECRET_KEY",
   "asset_resource_pool": "CIDC-CORE-00"
 }
 ```
+
+这些字段可在渠道编辑器的“高级设置 → 移动云素材库”中填写。素材 Access Key
+和 Secret Key 输入框为只写模式：编辑已有渠道时留空即可保留已保存的值。关闭
+开关会保留凭证，但会阻止素材管理请求。
 
 素材 AK/SK 与视频生成 Bearer key 分开保存，服务端不会返回给用户。
 

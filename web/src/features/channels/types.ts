@@ -80,6 +80,11 @@ export type Channel = z.infer<typeof channelSchema>
 // ============================================================================
 
 export interface ChannelSettings {
+  asset_enabled?: boolean
+  asset_base_url?: string
+  asset_access_key?: string
+  asset_secret_key?: string
+  asset_resource_pool?: string
   force_format?: boolean
   thinking_to_content?: boolean
   proxy?: string

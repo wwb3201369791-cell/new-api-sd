@@ -283,6 +283,11 @@ const SENSITIVE_FORM_FIELDS = [
   'settings',
   'setting',
   'advanced_custom',
+  'asset_enabled',
+  'asset_base_url',
+  'asset_access_key',
+  'asset_secret_key',
+  'asset_resource_pool',
   'is_enterprise_account',
   'vertex_key_type',
   'aws_key_type',
@@ -332,6 +337,7 @@ function hasConfiguredOverrideValue(value: unknown): boolean {
 }
 
 function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
+  const setting = parseSettingsRecord(values.setting)
   return Boolean(
     hasConfiguredOverrideValue(values.param_override) ||
     hasConfiguredOverrideValue(values.header_override) ||
@@ -342,6 +348,11 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.priority ||
     values.weight ||
     values.proxy?.trim() ||
+    values.asset_enabled ||
+    values.asset_base_url?.trim() ||
+    values.asset_resource_pool?.trim() ||
+    setting.asset_access_key ||
+    setting.asset_secret_key ||
     values.system_prompt?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
@@ -731,6 +742,7 @@ export function ChannelMutateDrawer({
   const keyMode = form.watch('key_mode')
   const currentGroups = form.watch('group')
   const currentType = form.watch('type')
+  const currentTaskPluginKey = form.watch('task_plugin_key')
   const currentStatus = form.watch('status')
   const currentBaseUrl = form.watch('base_url')
   const currentKey = form.watch('key')
@@ -754,6 +766,14 @@ export function ChannelMutateDrawer({
   const currentStatusCodeMapping = form.watch('status_code_mapping')
   const currentParamOverride = form.watch('param_override')
   const currentHeaderOverride = form.watch('header_override')
+  const currentSetting = form.watch('setting')
+  const currentAssetEnabled = form.watch('asset_enabled')
+  const currentAssetBaseURL = form.watch('asset_base_url')
+  const currentAssetResourcePool = form.watch('asset_resource_pool')
+  const currentSettingRecord = useMemo(
+    () => parseSettingsRecord(currentSetting),
+    [currentSetting]
+  )
   const currentForceFormat = form.watch('force_format')
   const currentThinkingToContent = form.watch('thinking_to_content')
   const currentPassThroughBodyEnabled = form.watch('pass_through_body_enabled')
@@ -937,6 +957,17 @@ export function ChannelMutateDrawer({
         ?.label || `#${currentType}`,
     [currentType]
   )
+  const isMobileCloudTaskPlugin =
+    currentType === CHANNEL_TYPE_TASK_PLUGIN &&
+    currentTaskPluginKey?.trim().toLowerCase() === 'mobilecloud'
+  const assetCredentialsConfigured = useMemo(() => {
+    return Boolean(
+      typeof currentSettingRecord.asset_access_key === 'string' &&
+        currentSettingRecord.asset_access_key.trim() &&
+        typeof currentSettingRecord.asset_secret_key === 'string' &&
+        currentSettingRecord.asset_secret_key.trim()
+    )
+  }, [currentSettingRecord])
   const taskPluginOptionsQuery = useQuery({
     queryKey: ['task-plugin-options'],
     queryFn: getTaskPluginOptions,
@@ -1033,6 +1064,11 @@ export function ChannelMutateDrawer({
     hasConfiguredOverrideValue(currentHeaderOverride)
   )
   const extraSettingsConfigured = Boolean(
+    currentAssetEnabled ||
+    currentAssetBaseURL?.trim() ||
+    currentAssetResourcePool?.trim() ||
+    currentSettingRecord.asset_access_key ||
+    currentSettingRecord.asset_secret_key ||
     currentForceFormat ||
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
@@ -1644,6 +1680,12 @@ export function ChannelMutateDrawer({
   // Submit handler
   const onSubmit = useCallback(
     async (data: ChannelFormValues) => {
+      // `setting` is intentionally not rendered as an editable JSON field.
+      // React Hook Form may omit unregistered defaults from submit data, so
+      // copy the hidden raw value explicitly before rebuilding it. This keeps
+      // unknown settings and write-only Mobile Cloud credentials intact.
+      data.setting = form.getValues('setting') || data.setting || ''
+
       // Validate key is required when creating
       if (!isEditing && !data.key?.trim()) {
         form.setError('key', {
@@ -4161,6 +4203,169 @@ export function ChannelMutateDrawer({
                                 {t('No permission to perform this action')}
                               </AlertDescription>
                             </Alert>
+                          )}
+                          {isMobileCloudTaskPlugin && (
+                            <fieldset
+                              disabled={sensitiveLocked}
+                              className='space-y-4 disabled:opacity-60'
+                            >
+                              <div className='border-border bg-muted/20 space-y-4 rounded-lg border p-4'>
+                                <div className='flex items-start gap-3'>
+                                  <IconBadge tone='chart-2' size='md'>
+                                    <Boxes className='h-4 w-4' />
+                                  </IconBadge>
+                                  <div className='min-w-0 space-y-1'>
+                                    <h4 className='text-sm font-semibold'>
+                                      {t('Mobile Cloud asset library')}
+                                    </h4>
+                                    <p className='text-muted-foreground text-xs'>
+                                      {t(
+                                        'Optional asset management for Mobile Cloud. Video generation continues to use the channel API key.'
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <FormField
+                                  control={form.control}
+                                  name='asset_enabled'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between gap-3 rounded-md border px-3 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel className='text-sm'>
+                                          {t('Enable Mobile Cloud asset library')}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Turn this off to keep the credentials but prevent asset-management requests.'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value === true}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <div className='grid gap-4 md:grid-cols-2'>
+                                  <FormField
+                                    control={form.control}
+                                    name='asset_base_url'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Asset API base URL')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder='https://ecloud.10086.cn'
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Leave empty to use the Mobile Cloud default endpoint.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='asset_resource_pool'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Asset resource pool')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder='CIDC-CORE-00'
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Leave empty to use CIDC-CORE-00.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='asset_access_key'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Asset Access Key')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type='password'
+                                            autoComplete='new-password'
+                                            placeholder={
+                                              assetCredentialsConfigured
+                                                ? t(
+                                                    'Configured — leave empty to keep the current value'
+                                                  )
+                                                : t('Enter Asset Access Key')
+                                            }
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Separate credential used only for Mobile Cloud asset APIs.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='asset_secret_key'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Asset Secret Key')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type='password'
+                                            autoComplete='new-password'
+                                            placeholder={
+                                              assetCredentialsConfigured
+                                                ? t(
+                                                    'Configured — leave empty to keep the current value'
+                                                  )
+                                                : t('Enter Asset Secret Key')
+                                            }
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'The secret is never populated into the form; an empty field keeps the saved value.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
+                              </div>
+                            </fieldset>
                           )}
                           <fieldset
                             disabled={sensitiveLocked}

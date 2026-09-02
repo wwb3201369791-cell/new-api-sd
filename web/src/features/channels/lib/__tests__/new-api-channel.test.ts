@@ -21,9 +21,15 @@ import { describe, expect, test } from 'vitest'
 import {
   CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_OPTIONS,
+  CHANNEL_TYPE_TASK_PLUGIN,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
-import { CHANNEL_FORM_DEFAULT_VALUES, channelFormSchema } from '../channel-form'
+import {
+  CHANNEL_FORM_DEFAULT_VALUES,
+  buildSettingJSON,
+  channelFormSchema,
+  transformChannelToFormDefaults,
+} from '../channel-form'
 import { getChannelTypeConfig } from '../channel-type-config'
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
@@ -87,5 +93,107 @@ describe('New API channel', () => {
     })
 
     expect(result.success).toBe(true)
+  })
+
+  test('preserves unknown channel settings and existing Mobile Cloud secrets', () => {
+    const form = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      name: 'Mobile Cloud',
+      type: CHANNEL_TYPE_TASK_PLUGIN,
+      task_plugin_key: 'mobilecloud',
+      base_url: 'https://example.com',
+      key: 'generation-key',
+      models: 'doubao-seedance-2.0',
+      setting: JSON.stringify({
+        task_plugin_key: 'mobilecloud',
+        asset_access_key: 'existing-ak',
+        asset_secret_key: 'existing-sk',
+        future_provider_option: 'keep-me',
+      }),
+      asset_enabled: true,
+      asset_access_key: '',
+      asset_secret_key: '',
+    }
+
+    const setting = JSON.parse(buildSettingJSON(form))
+    expect(setting.future_provider_option).toBe('keep-me')
+    expect(setting.asset_access_key).toBe('existing-ak')
+    expect(setting.asset_secret_key).toBe('existing-sk')
+    expect(setting.asset_enabled).toBe(true)
+  })
+
+  test('does not populate Mobile Cloud credentials into edit controls', () => {
+    const channel = {
+      id: 1,
+      type: CHANNEL_TYPE_TASK_PLUGIN,
+      key: '',
+      name: 'Mobile Cloud',
+      status: 1,
+      balance: 0,
+      models: 'doubao-seedance-2.0',
+      group: 'default',
+      used_quota: 0,
+      other: '',
+      other_info: '',
+      remark: '',
+      max_input_tokens: 0,
+      created_time: 0,
+      test_time: 0,
+      response_time: 0,
+      balance_updated_time: 0,
+      channel_info: {
+        is_multi_key: false,
+        multi_key_size: 0,
+        multi_key_polling_index: 0,
+        multi_key_mode: 'random' as const,
+      },
+      setting: JSON.stringify({
+        task_plugin_key: 'mobilecloud',
+        asset_access_key: 'existing-ak',
+        asset_secret_key: 'existing-sk',
+      }),
+      settings: '{}',
+    }
+
+    const defaults = transformChannelToFormDefaults(channel)
+    expect(defaults.asset_enabled).toBe(true)
+    expect(defaults.asset_access_key).toBe('')
+    expect(defaults.asset_secret_key).toBe('')
+  })
+
+  test('requires Mobile Cloud asset credentials only when the library is enabled', () => {
+    const baseForm = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: CHANNEL_TYPE_TASK_PLUGIN,
+      task_plugin_key: 'mobilecloud',
+      name: 'Mobile Cloud',
+      base_url: 'https://example.com',
+      key: 'generation-key',
+      models: 'doubao-seedance-2.0',
+    }
+
+    const disabled = channelFormSchema.safeParse({
+      ...baseForm,
+      asset_enabled: false,
+    })
+    expect(disabled.success).toBe(true)
+
+    const enabledWithoutCredentials = channelFormSchema.safeParse({
+      ...baseForm,
+      asset_enabled: true,
+    })
+    expect(enabledWithoutCredentials.success).toBe(false)
+    if (!enabledWithoutCredentials.success) {
+      expect(
+        enabledWithoutCredentials.error.issues.some(
+          (issue) => issue.path[0] === 'asset_access_key'
+        )
+      ).toBe(true)
+      expect(
+        enabledWithoutCredentials.error.issues.some(
+          (issue) => issue.path[0] === 'asset_secret_key'
+        )
+      ).toBe(true)
+    }
   })
 })

@@ -41,6 +41,28 @@ func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 	}
 }
 
+func TestChannelValidateSettingsMobileCloudAssets(t *testing.T) {
+	disabled := false
+	channel := &Channel{}
+	channel.SetSetting(dto.ChannelSettings{
+		AssetEnabled:      &disabled,
+		AssetAccessKey:    "asset-ak",
+		AssetSecretKey:    "asset-sk",
+		AssetBaseURL:      "https://ecloud.10086.cn",
+		AssetResourcePool: "CIDC-CORE-00",
+	})
+	require.NoError(t, channel.ValidateSettings())
+
+	enabled := true
+	channel.SetSetting(dto.ChannelSettings{
+		AssetEnabled:   &enabled,
+		AssetAccessKey: "asset-ak",
+	})
+	err := channel.ValidateSettings()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "asset_secret_key")
+}
+
 func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(t *testing.T) {
 	inferenceRoute := dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",

@@ -66,8 +66,12 @@ existing server address setting) before enabling this response path.
 
 ## Asset management
 
-When `asset_access_key` and `asset_secret_key` are configured in the channel
-settings, authenticated user APIs under `/api/mobilecloud/asset-groups` and
-`/api/mobilecloud/assets` proxy the official signed OpenAPI. The gateway also
-supports the real-person verification session/token flow. See
-`docs/mobilecloud-seedance.md` for request fields and the rollout checklist.
+Enable **Mobile Cloud asset library** in the channel's Advanced settings and
+enter the separate `asset_access_key` and `asset_secret_key` credentials.
+Authenticated user APIs under `/api/mobilecloud/asset-groups` and
+`/api/mobilecloud/assets` then proxy the official signed OpenAPI. The gateway
+also supports the real-person verification session/token flow. Existing
+channels without `asset_enabled` keep the legacy behavior when both asset
+credentials are present; an explicit `false` disables the library while
+retaining the credentials. See `docs/mobilecloud-seedance.md` for request
+fields and the rollout checklist.
