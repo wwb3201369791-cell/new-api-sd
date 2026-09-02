@@ -47,3 +47,42 @@ func TestClientSurfacesProviderError(t *testing.T) {
 		t.Fatalf("expected provider error, got %v", err)
 	}
 }
+
+func TestClientUsageAndDeductionEndpointsUseSignedPaths(t *testing.T) {
+	paths := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"OK","body":{}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{BaseURL: server.URL, AccessKey: "ak", SecretKey: "sk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err = client.QueryModelTokensConsumed(ctx, map[string]any{"model": "AICC-Doubao-Seedance-2.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.QueryAiccCreditDeduction(ctx, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.CreateAiccDeductionExportTask(ctx, map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.GetAiccDeductionExportTask(ctx, "export-1"); err != nil {
+		t.Fatal(err)
+	}
+	close(paths)
+	want := []string{
+		"/api/openapi-maas/model/tokens/consumed",
+		"/api/openapi-maas/model/aicc/deduction",
+		"/api/openapi-maas/model/aicc/deduction/export-task",
+		"/api/openapi-maas/model/aicc/deduction/export-task/export-1",
+	}
+	for _, expected := range want {
+		if actual := <-paths; actual != expected {
+			t.Fatalf("unexpected path: got %s want %s", actual, expected)
+		}
+	}
+}

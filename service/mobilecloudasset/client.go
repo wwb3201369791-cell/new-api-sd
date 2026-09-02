@@ -226,3 +226,24 @@ func (c *Client) CreateRealPersonSession(ctx context.Context, body map[string]an
 func (c *Client) GetAssetGroupByBytedToken(ctx context.Context, body map[string]any) (*Response, error) {
 	return c.Do(ctx, http.MethodPost, "/api/openapi-maas/exp/aicc/v2/real-person-auth/asset-group/by-byted-token", body, nil)
 }
+
+// QueryModelTokensConsumed and the deduction methods expose the optional
+// Mobile Cloud account/usage APIs through the same signed client. They are
+// intentionally separate from gateway task billing: New API still owns the
+// customer quota calculation, while these methods are for operator visibility
+// into the upstream resource package.
+func (c *Client) QueryModelTokensConsumed(ctx context.Context, body map[string]any) (*Response, error) {
+	return c.Do(ctx, http.MethodPost, "/api/openapi-maas/model/tokens/consumed", body, nil)
+}
+
+func (c *Client) QueryAiccCreditDeduction(ctx context.Context, body map[string]any) (*Response, error) {
+	return c.Do(ctx, http.MethodPost, "/api/openapi-maas/model/aicc/deduction", body, nil)
+}
+
+func (c *Client) CreateAiccDeductionExportTask(ctx context.Context, body map[string]any) (*Response, error) {
+	return c.Do(ctx, http.MethodPost, "/api/openapi-maas/model/aicc/deduction/export-task", body, nil)
+}
+
+func (c *Client) GetAiccDeductionExportTask(ctx context.Context, taskID string) (*Response, error) {
+	return c.Do(ctx, http.MethodGet, "/api/openapi-maas/model/aicc/deduction/export-task/"+url.PathEscape(taskID), nil, nil)
+}

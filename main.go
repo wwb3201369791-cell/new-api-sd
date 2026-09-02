@@ -29,6 +29,7 @@ import (
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/assetstore"
 	"github.com/QuantumNous/new-api/service/authz"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -307,6 +308,11 @@ func InitResources() error {
 	service.InitHttpClient()
 
 	service.InitTokenEncoders()
+	if err := assetstore.Init(); err != nil {
+		// Asset uploads are optional. Keep the API available when an operator
+		// has not configured an object-storage backend yet.
+		common.SysError("asset storage initialization skipped: " + err.Error())
+	}
 
 	// Initialize SQL Database
 	err = model.InitDB()

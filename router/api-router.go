@@ -252,9 +252,14 @@ func SetApiRouter(router *gin.Engine) {
 		// Mobile Cloud asset management. Credentials remain in the selected
 		// task-plugin channel; these user-authenticated routes expose only the
 		// provider's asset/group data and signed media URLs.
+		// Local object URLs are deliberately public capability URLs so the
+		// upstream can fetch them after asynchronous asset registration.
+		apiRouter.GET("/mobilecloud/uploads/:object_key", controller.ServeMobileCloudAsset)
 		mobileCloudAssetRoute := apiRouter.Group("/mobilecloud")
 		mobileCloudAssetRoute.Use(middleware.UserAuth())
 		{
+			mobileCloudAssetRoute.GET("/storage", controller.GetMobileCloudAssetStorage)
+			mobileCloudAssetRoute.POST("/uploads", controller.UploadMobileCloudAsset)
 			mobileCloudAssetRoute.GET("/asset-groups", controller.ListMobileCloudAssetGroups)
 			mobileCloudAssetRoute.POST("/asset-groups", controller.CreateMobileCloudAssetGroup)
 			mobileCloudAssetRoute.GET("/asset-groups/:group_id", controller.GetMobileCloudAssetGroup)
@@ -267,6 +272,10 @@ func SetApiRouter(router *gin.Engine) {
 			mobileCloudAssetRoute.DELETE("/assets/:asset_id", controller.DeleteMobileCloudAsset)
 			mobileCloudAssetRoute.POST("/real-person-auth/sessions", controller.CreateMobileCloudRealPersonSession)
 			mobileCloudAssetRoute.POST("/real-person-auth/asset-group/by-byted-token", controller.GetMobileCloudAssetGroupByBytedToken)
+			mobileCloudAssetRoute.POST("/billing/tokens/consumed", controller.QueryMobileCloudModelTokensConsumed)
+			mobileCloudAssetRoute.POST("/billing/deductions", controller.QueryMobileCloudAiccCreditDeduction)
+			mobileCloudAssetRoute.POST("/billing/deductions/export", controller.CreateMobileCloudAiccDeductionExportTask)
+			mobileCloudAssetRoute.GET("/billing/deductions/export/:task_id", controller.GetMobileCloudAiccDeductionExportTask)
 		}
 		apiRouter.GET("/task_plugin_options", middleware.AdminAuth(), middleware.RequirePermission(authz.TaskPluginBind), controller.GetTaskPluginOptions)
 		registerChannelRoutes(apiRouter)

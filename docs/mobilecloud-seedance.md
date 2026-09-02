@@ -52,12 +52,20 @@ Compare-And-Swap 更新本地任务并执行一次额度退款，避免轮询器
 - `GET|PUT|DELETE /api/mobilecloud/assets/:asset_id`
 - `POST /api/mobilecloud/real-person-auth/sessions`
 - `POST /api/mobilecloud/real-person-auth/asset-group/by-byted-token`
+- `POST /api/mobilecloud/billing/tokens/consumed`
+- `POST /api/mobilecloud/billing/deductions`
+- `POST /api/mobilecloud/billing/deductions/export`
+- `GET /api/mobilecloud/billing/deductions/export/:task_id`
 
 网关按移动云 V2.0 规则签名（HMAC-SHA1，支持 HMAC-SHA256），并保留一份
-脱敏后的本地索引。创建素材使用移动云规定的公网 HTTP(S) URL，移动云会将
-对象下载到其 EOS 存储并返回约 12 小时有效的预签名 URL；因此当前不要求在
-网关服务器上落地大文件，也不会占用服务器磁盘。真人素材组必须经过官方
-活体认证流程，网关只转发认证会话和 Token 查询，不绕过认证。
+脱敏后的本地索引。除了直接传入公网 URL，网页端还可通过
+`POST /api/mobilecloud/uploads` 上传本地图片、视频或音频：文件先写入本地
+目录或 S3 兼容对象存储，再以公网 URL 注册到移动云。对象存储由
+`ASSET_STORAGE_MODE=local|s3` 选择，S3 模式兼容 MinIO、R2、OSS 等服务。
+移动云会将对象下载到其 EOS 存储并返回约 12 小时有效的预签名 URL；真人
+素材组必须经过官方活体认证流程，网关只转发认证会话和 Token 查询，不绕过
+认证。资费查询/导出接口也已透传，但 New API 的客户额度结算仍以自身账单
+系统为准。
 
 ## 润元扩展
 

@@ -20,6 +20,7 @@ import {
   Activity,
   Box,
   CreditCard,
+  FolderOpen,
   FileText,
   FlaskConical,
   Key,
@@ -104,6 +105,11 @@ export function useSidebarData(): SidebarData {
         id: 'personal',
         title: t('Personal'),
         items: [
+          {
+            title: t('Asset Library'),
+            url: '/assets',
+            icon: FolderOpen,
+          },
           {
             title: t('Wallet'),
             url: '/wallet',

@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/assetstore"
 	mobilecloudasset "github.com/QuantumNous/new-api/service/mobilecloudasset"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -203,6 +208,165 @@ func CreateMobileCloudAsset(c *gin.Context) {
 	assetAPIResponse(c, response)
 }
 
+// GetMobileCloudAssetStorage exposes only non-sensitive storage capabilities
+// so the web UI can validate files before uploading. Provider credentials are
+// intentionally never returned.
+func GetMobileCloudAssetStorage(c *gin.Context) {
+	store := assetstore.Get()
+	if store == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "asset storage is not configured"})
+		return
+	}
+	config := store.Config()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"enabled":       true,
+			"mode":          config.Mode,
+			"max_bytes":     config.MaxBytes,
+			"allowed_types": []string{"image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm", "video/quicktime", "audio/mpeg", "audio/mp4", "audio/wav", "audio/x-wav", "audio/ogg"},
+		},
+	})
+}
+
+// UploadMobileCloudAsset stores a browser-selected file in the configured
+// local/S3-compatible object store. When group_id is supplied, the uploaded
+// public URL is immediately registered with Mobile Cloud as an asset so the
+// caller has one operation to perform.
+func UploadMobileCloudAsset(c *gin.Context) {
+	store := assetstore.Get()
+	if store == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "asset storage is not configured"})
+		return
+	}
+	limit := store.Config().MaxBytes
+	// Multipart framing adds a small amount of overhead. The storage layer
+	// still enforces the exact byte limit while this protects request parsing.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit+1<<20)
+	if err := c.Request.ParseMultipartForm(limit + 1<<20); err != nil {
+		assetAPIError(c, fmt.Errorf("invalid multipart upload: %w", err))
+		return
+	}
+	header, err := c.FormFile("file")
+	if err != nil {
+		assetAPIError(c, errors.New("multipart field 'file' is required"))
+		return
+	}
+	if header.Size < 0 || header.Size > limit {
+		assetAPIError(c, fmt.Errorf("asset exceeds configured size limit of %d bytes", limit))
+		return
+	}
+	file, err := header.Open()
+	if err != nil {
+		assetAPIError(c, fmt.Errorf("open uploaded asset: %w", err))
+		return
+	}
+	defer file.Close()
+	contentType := assetstore.NormalizeContentType(header.Header.Get("Content-Type"))
+	var sniffed [512]byte
+	read, readErr := io.ReadFull(file, sniffed[:])
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		assetAPIError(c, fmt.Errorf("inspect uploaded asset: %w", readErr))
+		return
+	}
+	if detected := assetstore.NormalizeContentType(http.DetectContentType(sniffed[:read])); !assetstore.IsAllowedContentType(contentType) {
+		contentType = detected
+	}
+	if !assetstore.IsAllowedContentType(contentType) {
+		assetAPIError(c, errors.New("only image, video, and audio assets are supported"))
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		assetAPIError(c, fmt.Errorf("rewind uploaded asset: %w", err))
+		return
+	}
+	name := strings.TrimSpace(c.PostForm("asset_name"))
+	if name == "" {
+		name = strings.TrimSpace(filepath.Base(header.Filename))
+	}
+	if name == "" || len([]rune(name)) > 64 {
+		assetAPIError(c, errors.New("asset_name is required and must be at most 64 characters"))
+		return
+	}
+	object, err := store.Upload(c.Request.Context(), file, name, contentType, header.Size)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	assetURL, err := store.URL(object.Key, requestAssetBaseURL(c))
+	if err != nil {
+		// Avoid orphaning a successfully written object when the public URL is
+		// misconfigured (for example, no ServerAddress behind a reverse proxy).
+		_ = store.Delete(c.Request.Context(), object.Key)
+		assetAPIError(c, err)
+		return
+	}
+	object.URL = assetURL
+	result := gin.H{"upload": object}
+
+	groupID := strings.TrimSpace(c.PostForm("group_id"))
+	if groupID != "" {
+		client, channel, clientErr := mobileCloudAssetClient(c)
+		if clientErr != nil {
+			_ = store.Delete(c.Request.Context(), object.Key)
+			assetAPIError(c, clientErr)
+			return
+		}
+		assetType := strings.TrimSpace(c.PostForm("asset_type"))
+		if assetType == "" {
+			assetType = assetTypeFromContentType(contentType)
+		}
+		if assetType != "Image" && assetType != "Video" && assetType != "Audio" {
+			_ = store.Delete(c.Request.Context(), object.Key)
+			assetAPIError(c, errors.New("asset_type must be Image, Video, or Audio"))
+			return
+		}
+		providerRequest := map[string]any{"assetName": name, "assetUrl": assetURL, "assetType": assetType, "groupId": groupID}
+		response, providerErr := client.CreateAsset(c.Request.Context(), providerRequest)
+		if providerErr != nil {
+			// Keep the uploaded object in the response so the user can retry
+			// provider registration without uploading the bytes again.
+			result["provider_error"] = providerErr.Error()
+			c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": providerErr.Error(), "data": result})
+			return
+		}
+		persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
+		result["asset"] = providerResponseValue(response)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+// ServeMobileCloudAsset serves local objects without requiring a user token;
+// Mobile Cloud must be able to fetch the URL asynchronously after registration.
+// Object keys are random, single path segments, and traversal is rejected by
+// the storage boundary.
+func ServeMobileCloudAsset(c *gin.Context) {
+	store := assetstore.Get()
+	if store == nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	path, err := store.LocalPath(c.Param("object_key"))
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Header("Content-Disposition", "inline")
+	http.ServeContent(c.Writer, c.Request, filepath.Base(path), info.ModTime(), file)
+}
+
 func GetMobileCloudAsset(c *gin.Context) {
 	client, _, err := mobileCloudAssetClient(c)
 	if err != nil {
@@ -242,10 +406,16 @@ func DeleteMobileCloudAsset(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
+	assetURL := findPersistedAssetURL(c.Request.Context(), c.GetInt("id"), c.Param("asset_id"))
 	response, err := client.DeleteAsset(c.Request.Context(), c.Param("asset_id"))
 	if err != nil {
 		assetAPIError(c, err)
 		return
+	}
+	if key := localAssetObjectKey(assetURL); key != "" {
+		if store := assetstore.Get(); store != nil {
+			_ = store.Delete(c.Request.Context(), key)
+		}
 	}
 	assetAPIResponse(c, response)
 }
@@ -285,6 +455,82 @@ func GetMobileCloudAssetGroupByBytedToken(c *gin.Context) {
 		return
 	}
 	response, err := client.GetAssetGroupByBytedToken(c.Request.Context(), body)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	assetAPIResponse(c, response)
+}
+
+func QueryMobileCloudModelTokensConsumed(c *gin.Context) {
+	client, _, err := mobileCloudAssetClient(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	body, err := readAssetJSON(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	response, err := client.QueryModelTokensConsumed(c.Request.Context(), body)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	assetAPIResponse(c, response)
+}
+
+func QueryMobileCloudAiccCreditDeduction(c *gin.Context) {
+	client, _, err := mobileCloudAssetClient(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	body, err := readAssetJSON(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	response, err := client.QueryAiccCreditDeduction(c.Request.Context(), body)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	assetAPIResponse(c, response)
+}
+
+func CreateMobileCloudAiccDeductionExportTask(c *gin.Context) {
+	client, _, err := mobileCloudAssetClient(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	body, err := readAssetJSON(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	response, err := client.CreateAiccDeductionExportTask(c.Request.Context(), body)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	assetAPIResponse(c, response)
+}
+
+func GetMobileCloudAiccDeductionExportTask(c *gin.Context) {
+	client, _, err := mobileCloudAssetClient(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	if taskID == "" || len(taskID) > 128 {
+		assetAPIError(c, errors.New("task_id is required"))
+		return
+	}
+	response, err := client.GetAiccDeductionExportTask(c.Request.Context(), taskID)
 	if err != nil {
 		assetAPIError(c, err)
 		return
@@ -368,10 +614,7 @@ func persistAssetGroups(ctx context.Context, userID, channelID int, value any) {
 	if !ok {
 		return
 	}
-	items := []any{envelope}
-	if data, exists := envelope["data"].([]any); exists {
-		items = data
-	}
+	items := providerItems(envelope)
 	for _, item := range items {
 		group, ok := item.(map[string]any)
 		if !ok {
@@ -403,10 +646,7 @@ func persistAssets(ctx context.Context, userID, channelID int, value any) {
 		}
 		return
 	}
-	items := []any{envelope}
-	if data, exists := envelope["data"].([]any); exists {
-		items = data
-	}
+	items := providerItems(envelope)
 	for _, item := range items {
 		asset, ok := item.(map[string]any)
 		if !ok {
@@ -431,6 +671,52 @@ func persistAssets(ctx context.Context, userID, channelID int, value any) {
 		model.TouchMobileCloudAsset(&row)
 		_ = model.DB.WithContext(ctx).Save(&row).Error
 	}
+}
+
+// providerItems unwraps the pagination envelopes used by Mobile Cloud and
+// keeps single-resource responses intact. The provider has used both `list`
+// and `data` in different API revisions, so persistence must accept either.
+func providerItems(value map[string]any) []any {
+	for _, key := range []string{"list", "items", "data", "results", "records"} {
+		nested, exists := value[key]
+		if !exists {
+			continue
+		}
+		if items, ok := nested.([]any); ok {
+			return items
+		}
+		if record, ok := nested.(map[string]any); ok {
+			items := providerItems(record)
+			if len(items) > 0 {
+				return items
+			}
+		}
+	}
+	return []any{value}
+}
+
+func findPersistedAssetURL(ctx context.Context, userID int, providerID string) string {
+	var row model.MobileCloudAsset
+	if err := model.DB.WithContext(ctx).Where("user_id = ? AND provider_asset_id = ?", userID, providerID).First(&row).Error; err != nil {
+		return ""
+	}
+	return row.AssetURL
+}
+
+func localAssetObjectKey(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	const prefix = "/api/mobilecloud/uploads/"
+	if !strings.HasPrefix(parsed.Path, prefix) {
+		return ""
+	}
+	key, err := url.PathUnescape(strings.TrimPrefix(parsed.Path, prefix))
+	if err != nil || strings.Contains(key, "/") || strings.Contains(key, "\\") || key == "" {
+		return ""
+	}
+	return key
 }
 
 func assetAPIResponse(c *gin.Context, response *mobilecloudasset.Response) {
@@ -463,6 +749,46 @@ func assetAPIError(c *gin.Context, err error) {
 		message = err.Error()
 	}
 	c.JSON(status, gin.H{"success": false, "message": message})
+}
+
+func providerResponseValue(response *mobilecloudasset.Response) any {
+	if response == nil || len(response.Body) == 0 {
+		return nil
+	}
+	var value any
+	if err := common.Unmarshal(response.Body, &value); err != nil {
+		return gin.H{"raw": string(response.Body)}
+	}
+	return value
+}
+
+func assetTypeFromContentType(contentType string) string {
+	contentType = assetstore.NormalizeContentType(contentType)
+	if strings.HasPrefix(contentType, "image/") {
+		return "Image"
+	}
+	if strings.HasPrefix(contentType, "video/") {
+		return "Video"
+	}
+	return "Audio"
+}
+
+func requestAssetBaseURL(c *gin.Context) string {
+	configured := strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/")
+	if parsed, err := url.Parse(configured); err == nil && parsed.Hostname() != "" {
+		host := strings.ToLower(parsed.Hostname())
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return configured
+		}
+	}
+	proto := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0])
+	if proto != "http" && proto != "https" {
+		proto = "http"
+	}
+	if host := strings.TrimSpace(c.Request.Host); host != "" {
+		return proto + "://" + host
+	}
+	return configured
 }
 
 func stringValue(value any) string {
