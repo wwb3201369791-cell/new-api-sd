@@ -47,6 +47,23 @@ ID，因而可以用“网关请求 ID → 上游请求 ID → 任务 ID”定�
 
 素材 AK/SK 与视频生成 Bearer key 分开保存，服务端不会返回给用户。
 
+### 默认模型计费
+
+`doubao-seedance-2.0`（以及上游别名 `doubao-seedance-2-0-260128`）内置了
+按上游 completion token 结算的阶梯表达式：无输入视频时 480p/720p 为 92
+元/百万 token、1080p 为 102 元/百万 token；有输入视频时分别为 56 和 62
+元/百万 token。管理员仍可在分组与模型定价设置中覆盖这组默认值，覆盖后以
+数据库中的表达式为准。
+
+### 制品预览与公网地址
+
+视频/音频/图片预览请求会显式带 `disposition=inline`，下载请求带
+`disposition=attachment`，网关不会把上游的 `Content-Disposition: attachment`
+误传给播放器。生产环境应把系统设置中的 `TaskPublicAddress` 配置为客户端
+可访问的完整 HTTPS 地址（例如 `https://api.example.com`，不要带路径查询
+参数）；未配置时才回退到 `ServerAddress`。反向代理终止 TLS 时也必须设置该
+地址，否则浏览器会按混合内容规则拦截 HTTP 制品链接。
+
 ## 素材管理 API
 
 用户令牌调用以下网关接口即可管理素材组和素材：

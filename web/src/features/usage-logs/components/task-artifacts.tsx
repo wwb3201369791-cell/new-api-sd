@@ -59,6 +59,7 @@ import { cn } from '@/lib/utils'
 
 import { getTaskArtifacts } from '../api'
 import {
+  getTaskArtifactMediaUrl,
   resolveTaskPreviewMode,
   shouldLoadTaskArtifacts,
 } from '../lib/task-artifacts'
@@ -243,7 +244,10 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
       <ArtifactMedia
         key={mediaRevision}
         artifact={props.artifact}
-        mediaUrl={props.artifact.content_url}
+        mediaUrl={getTaskArtifactMediaUrl(
+          props.artifact.content_url,
+          'inline'
+        )}
         onError={() => setMediaFailed(true)}
       />
     )
@@ -282,7 +286,10 @@ function TaskArtifactCard(props: { artifact: TaskArtifact }) {
           nativeButton={false}
           render={
             <a
-              href={props.artifact.content_url}
+              href={getTaskArtifactMediaUrl(
+                props.artifact.content_url,
+                'attachment'
+              )}
               download={props.artifact.key}
               target='_blank'
               rel='noopener noreferrer'
@@ -492,7 +499,7 @@ function LegacyVideoMedia(props: LegacyVideoMediaProps) {
   ) : (
     <video
       key={mediaRevision}
-      src={props.contentUrl}
+      src={getTaskArtifactMediaUrl(props.contentUrl, 'inline')}
       controls
       preload='metadata'
       className='max-h-[60vh] w-full rounded-md bg-black'

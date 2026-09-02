@@ -367,6 +367,7 @@ func TestProxyTaskMediaForwardsRangeAndFiltersResponseHeaders(t *testing.T) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.Header().Set("Content-Range", "bytes 0-3/10")
 		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Disposition", "attachment; filename=provider.mp4")
 		w.Header().Set("Set-Cookie", "provider=secret")
 		w.Header().Set("WWW-Authenticate", "Bearer provider")
 		w.Header().Set("X-Provider-Secret", "hidden")
@@ -400,9 +401,44 @@ func TestProxyTaskMediaForwardsRangeAndFiltersResponseHeaders(t *testing.T) {
 	assert.Equal(t, "sandbox; default-src 'none'", recorder.Header().Get("Content-Security-Policy"))
 	assert.Equal(t, "no-referrer", recorder.Header().Get("Referrer-Policy"))
 	assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "inline", recorder.Header().Get("Content-Disposition"))
 	assert.Empty(t, recorder.Header().Get("Set-Cookie"))
 	assert.Empty(t, recorder.Header().Get("WWW-Authenticate"))
 	assert.Empty(t, recorder.Header().Get("X-Provider-Secret"))
+}
+
+func TestProxyTaskMediaHonorsAttachmentDispositionOverride(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer upstream.Close()
+	allowPrivateTaskMediaTest(t)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/content?disposition=attachment", nil)
+
+	require.NoError(t, proxyTaskMedia(c, task, &relaychannel.TaskContentRequest{
+		URL: upstream.URL, Method: http.MethodGet,
+	}))
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "attachment", recorder.Header().Get("Content-Disposition"))
+}
+
+func TestProxyTaskMediaRejectsInvalidDisposition(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/content?disposition=download", nil)
+
+	err := proxyTaskMedia(c, task, &relaychannel.TaskContentRequest{URL: "https://example.com/video.mp4", Method: http.MethodGet})
+	var proxyErr *taskMediaProxyError
+	require.ErrorAs(t, err, &proxyErr)
+	assert.Equal(t, http.StatusBadRequest, proxyErr.status)
+	assert.Equal(t, "artifact_request_rejected", proxyErr.code)
 }
 
 func TestProxyTaskMediaPassesThroughUnsatisfiedRange(t *testing.T) {

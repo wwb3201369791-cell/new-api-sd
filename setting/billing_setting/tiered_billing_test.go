@@ -5,9 +5,10 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,4 +103,25 @@ func TestSmokeTestExprRejectsTaskUsageWithoutSchema(t *testing.T) {
 	assert.ErrorContains(t, err, "no task plugin usage schema")
 
 	require.NoError(t, SmokeTestExpr(`tier("base", p * 2 + c * 8)`))
+}
+
+func TestDefaultSeedanceBillingExpressionIsAvailableAndUsesPublishedTiers(t *testing.T) {
+	require.Equal(t, BillingModeTieredExpr, GetBillingMode(defaultSeedanceModel))
+	require.Equal(t, BillingModeTieredExpr, GetBillingMode(defaultSeedanceConcreteModel))
+	expr, ok := GetBillingExpr(defaultSeedanceModel)
+	require.True(t, ok)
+	require.Equal(t, defaultSeedanceBillingExpr, expr)
+
+	schema := map[string]jsplugin.UsageFieldSchema{
+		"tokens":      {Type: "number", Unit: "token"},
+		"resolution":  {Enum: []string{"480p", "720p", "1080p"}},
+		"video_input": {Enum: []string{"none", "video"}},
+	}
+	require.NoError(t, SmokeTestTaskExpr(expr, schema))
+
+	result, _, err := billingexpr.RunExprWithRequest(expr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: map[string]any{
+		"tokens": 100000.0, "resolution": "1080p", "video_input": "video",
+	}})
+	require.NoError(t, err)
+	assert.InDelta(t, 6.2, result, 0.000001)
 }

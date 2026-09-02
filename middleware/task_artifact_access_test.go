@@ -34,12 +34,13 @@ func TestTaskArtifactAccessIsRedactedAndVerifiedBeforeHandler(t *testing.T) {
 			assert.True(t, IsTaskArtifactAccess(c))
 			assert.NotContains(t, c.Request.URL.RawQuery, service.TaskArtifactAccessQueryParameter)
 			assert.Equal(t, "kept", c.Query("keep"))
+			assert.Equal(t, "inline", c.Query("disposition"))
 			c.Status(http.StatusNoContent)
 		},
 	)
 	request := httptest.NewRequest(
 		http.MethodGet,
-		"/v1/tasks/task-1/artifacts/video-main/content?access="+urlQueryEscape(access)+"&keep=kept",
+		"/v1/tasks/task-1/artifacts/video-main/content?access="+urlQueryEscape(access)+"&keep=kept&disposition=inline",
 		nil,
 	)
 	request.RemoteAddr = "192.0.2.1:1234"

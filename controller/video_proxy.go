@@ -136,6 +136,13 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 			message: "Artifact content plugin returned no request",
 		}
 	}
+	disposition, err := taskMediaDisposition(c)
+	if err != nil {
+		return &taskMediaProxyError{
+			status: http.StatusBadRequest, code: "artifact_request_rejected",
+			message: "Artifact disposition was rejected", err: err,
+		}
+	}
 	rawURL := strings.TrimSpace(descriptor.URL)
 	if rawURL == "" {
 		return &taskMediaProxyError{
@@ -282,6 +289,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusPartialContent, http.StatusNotModified, http.StatusRequestedRangeNotSatisfiable:
 		copyTaskMediaResponseHeaders(c.Writer.Header(), resp.Header)
+		setTaskMediaResponseDisposition(c.Writer.Header(), disposition, resp.Header.Get("Content-Disposition"))
 		setTaskMediaResponseSecurityHeaders(c.Writer.Header())
 		c.Status(resp.StatusCode)
 		c.Writer.WriteHeaderNow()
@@ -540,12 +548,45 @@ func copyTaskMediaResponseHeaders(destination, source http.Header) {
 		"Accept-Ranges",
 		"ETag",
 		"Last-Modified",
-		"Content-Disposition",
 	} {
 		for _, value := range source.Values(name) {
 			destination.Add(name, value)
 		}
 	}
+}
+
+func taskMediaDisposition(c *gin.Context) (string, error) {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "inline", nil
+	}
+	values, exists := c.Request.URL.Query()["disposition"]
+	if !exists {
+		return "inline", nil
+	}
+	if len(values) != 1 {
+		return "", errors.New("disposition must be specified once")
+	}
+	switch strings.ToLower(strings.TrimSpace(values[0])) {
+	case "inline":
+		return "inline", nil
+	case "attachment":
+		return "attachment", nil
+	default:
+		return "", errors.New("disposition must be inline or attachment")
+	}
+}
+
+func setTaskMediaResponseDisposition(header http.Header, disposition, upstream string) {
+	header.Del("Content-Disposition")
+	if disposition == "attachment" {
+		if strings.TrimSpace(upstream) != "" && !strings.ContainsAny(upstream, "\r\n") {
+			header.Set("Content-Disposition", upstream)
+			return
+		}
+		header.Set("Content-Disposition", "attachment")
+		return
+	}
+	header.Set("Content-Disposition", "inline")
 }
 
 func setTaskMediaResponseSecurityHeaders(header http.Header) {
@@ -611,11 +652,16 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 
 	c.Writer.Header().Set("Content-Type", mimeType)
 	c.Writer.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
+	disposition, err := taskMediaDisposition(c)
+	if err != nil {
+		return err
+	}
+	setTaskMediaResponseDisposition(c.Writer.Header(), disposition, "")
 	setTaskMediaResponseSecurityHeaders(c.Writer.Header())
 	c.Writer.WriteHeader(http.StatusOK)
 	if c.Request.Method == http.MethodHead {
 		return nil
 	}
-	_, err := io.Copy(c.Writer, base64.NewDecoder(encoding, strings.NewReader(payload)))
+	_, err = io.Copy(c.Writer, base64.NewDecoder(encoding, strings.NewReader(payload)))
 	return err
 }

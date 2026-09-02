@@ -6,10 +6,10 @@ import (
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/samber/lo"
 )
@@ -34,6 +34,29 @@ var billingSetting = BillingSetting{
 	BillingExpr: make(map[string]string),
 }
 
+// Seedance task providers expose the same public model name and report their
+// billable completion tokens asynchronously. Keep a safe, provider-documented
+// default expression so a newly configured task-plugin channel is visible in
+// /v1/models and can be used before an administrator customizes pricing.
+//
+// The expression returns USD for the request. Mobile Cloud's 480p/720p and
+// 1080p rates differ for video-to-video input, so the usage facts supplied by
+// the task plugin select the correct tier at submit and settlement time.
+const defaultSeedanceModel = "doubao-seedance-2.0"
+const defaultSeedanceConcreteModel = "doubao-seedance-2-0-260128"
+
+const defaultSeedanceBillingExpr = `u("video_input") == "video" ? (u("resolution") == "1080p" ? tier("1080p_video", u("tokens") * 62 / 1000000) : tier("480p_720p_video", u("tokens") * 56 / 1000000)) : (u("resolution") == "1080p" ? tier("1080p", u("tokens") * 102 / 1000000) : tier("480p_720p", u("tokens") * 92 / 1000000))`
+
+var defaultBillingMode = map[string]string{
+	defaultSeedanceModel:         BillingModeTieredExpr,
+	defaultSeedanceConcreteModel: BillingModeTieredExpr,
+}
+
+var defaultBillingExpr = map[string]string{
+	defaultSeedanceModel:         defaultSeedanceBillingExpr,
+	defaultSeedanceConcreteModel: defaultSeedanceBillingExpr,
+}
+
 func init() {
 	config.GlobalConfig.Register("billing_setting", &billingSetting)
 }
@@ -46,20 +69,26 @@ func GetBillingMode(model string) string {
 	if mode, ok := billingSetting.BillingMode[model]; ok {
 		return mode
 	}
+	if mode, ok := defaultBillingMode[model]; ok {
+		return mode
+	}
 	return BillingModeRatio
 }
 
 func GetBillingExpr(model string) (string, bool) {
-	expr, ok := billingSetting.BillingExpr[model]
+	if expr, ok := billingSetting.BillingExpr[model]; ok {
+		return expr, true
+	}
+	expr, ok := defaultBillingExpr[model]
 	return expr, ok
 }
 
 func GetBillingModeCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingMode)
+	return lo.Assign(defaultBillingMode, billingSetting.BillingMode)
 }
 
 func GetBillingExprCopy() map[string]string {
-	return lo.Assign(billingSetting.BillingExpr)
+	return lo.Assign(defaultBillingExpr, billingSetting.BillingExpr)
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {

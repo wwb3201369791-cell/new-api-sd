@@ -328,6 +328,12 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	artifactStore := service.GetTaskArtifactStore()
 	if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
+		disposition, dispositionErr := taskMediaDisposition(c)
+		if dispositionErr != nil {
+			writeTaskArtifactError(c, http.StatusBadRequest, "artifact_request_rejected", "Artifact disposition was rejected")
+			return
+		}
+		setTaskMediaResponseDisposition(c.Writer.Header(), disposition, "")
 		_ = artifactStore.Serve(c, task, ref)
 		return
 	}

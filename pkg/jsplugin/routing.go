@@ -428,6 +428,21 @@ func (g *RoutingGeneration) GetByModel(model string) (*LoadedPlugin, bool) {
 	return plugin, ok
 }
 
+// ModelNames returns the unique model declarations exposed by the current
+// plugin generation. The result is a defensive copy so callers can safely
+// sort or extend it while the immutable generation remains request-safe.
+func (g *RoutingGeneration) ModelNames() []string {
+	if g == nil || len(g.byModel) == 0 {
+		return nil
+	}
+	models := make([]string, 0, len(g.byModel))
+	for model := range g.byModel {
+		models = append(models, model)
+	}
+	slices.Sort(models)
+	return models
+}
+
 // CanonicalModel returns the declared spelling for model. An exact byModel
 // hit wins and returns the input unchanged; otherwise the ASCII-folded
 // index is consulted. Miss and nil-receiver return ("", false).

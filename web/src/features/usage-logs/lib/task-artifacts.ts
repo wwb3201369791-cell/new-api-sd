@@ -32,6 +32,7 @@ const taskArtifactContentPathPattern =
 const taskArtifactAccessTokenPattern = /^[A-Za-z0-9_-]{43}$/
 const maxTaskArtifacts = 64
 export type TaskPreviewMode = 'plugin' | 'legacy-suno' | 'legacy-video' | 'none'
+export type TaskArtifactDisposition = 'inline' | 'attachment'
 
 export class TaskArtifactApiError extends Error {
   constructor(
@@ -100,6 +101,33 @@ function parseContentUrl(value: unknown): string {
     if (error instanceof TaskArtifactApiError) throw error
     throw new TaskArtifactApiError('invalid_content_url')
   }
+}
+
+/**
+ * Resolve a capability URL for a browser media element or a download link.
+ *
+ * Artifact URLs are generated from the server's configured public address.
+ * When a reverse proxy terminates TLS and the configured address still uses
+ * http on the same host, upgrade that URL to the current https origin to
+ * avoid browser mixed-content blocking. The server remains the source of
+ * truth for cross-host public addresses.
+ */
+export function getTaskArtifactMediaUrl(
+  contentUrl: string,
+  disposition: TaskArtifactDisposition
+): string {
+  const url = new URL(contentUrl)
+  if (
+    typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    url.protocol === 'http:' &&
+    url.hostname.toLowerCase() === window.location.hostname.toLowerCase()
+  ) {
+    url.protocol = 'https:'
+    url.port = window.location.port
+  }
+  url.searchParams.set('disposition', disposition)
+  return url.toString()
 }
 
 function parseTaskArtifact(value: unknown): TaskArtifact {

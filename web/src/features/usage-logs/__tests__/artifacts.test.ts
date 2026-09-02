@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 
 import {
+  getTaskArtifactMediaUrl,
   getSafePluginAuthorUrl,
   parseTaskArtifactsResponse,
   resolveTaskPreviewMode,
@@ -61,6 +62,16 @@ function taskFixture(overrides: Partial<TaskLog> = {}): TaskLog {
 }
 
 describe('task artifact projection', () => {
+  test('adds an explicit disposition for media and downloads', () => {
+    const contentUrl = artifactContentUrl('video-main')
+    const previewUrl = getTaskArtifactMediaUrl(contentUrl, 'inline')
+    const downloadUrl = getTaskArtifactMediaUrl(contentUrl, 'attachment')
+
+    assert.equal(new URL(previewUrl).searchParams.get('access'), artifactAccessToken)
+    assert.equal(new URL(previewUrl).searchParams.get('disposition'), 'inline')
+    assert.equal(new URL(downloadUrl).searchParams.get('disposition'), 'attachment')
+  })
+
   test('enables projection only after a successful artifact viewer opens', () => {
     const successfulPluginTask = taskFixture()
 

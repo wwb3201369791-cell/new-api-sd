@@ -90,6 +90,20 @@ func init() {
 			OwnedBy: "midjourney",
 		})
 	}
+	// Task plugins are dynamically registered before controller initialization,
+	// but their models do not belong to a numeric adaptor API type. Include
+	// those declarations in the static model index as well so
+	// GET /v1/models/:model uses the same metadata path as regular adaptors.
+	for _, modelName := range jsplugin.DefaultRegistry.Generation().ModelNames() {
+		if plugin, ok := jsplugin.DefaultRegistry.GetByModel(modelName); ok && plugin != nil {
+			openAIModels = append(openAIModels, dto.OpenAIModels{
+				Id:      modelName,
+				Object:  "model",
+				Created: 1626777600,
+				OwnedBy: plugin.Meta.Name,
+			})
+		}
+	}
 	openAIModelsMap = make(map[string]dto.OpenAIModels)
 	for _, aiModel := range openAIModels {
 		openAIModelsMap[aiModel.Id] = aiModel

@@ -451,6 +451,12 @@ func (r *Registry) GetByChannelType(channelType int) (*LoadedPlugin, bool) {
 	return r.Generation().GetByChannelType(channelType)
 }
 
+// GetByModel returns the deterministic plugin metadata owner for a model in
+// the currently published generation.
+func (r *Registry) GetByModel(model string) (*LoadedPlugin, bool) {
+	return r.Generation().GetByModel(model)
+}
+
 // Enabled reports the master switch position. When false the published
 // routing generation contains no plugins regardless of the other layers.
 func (r *Registry) Enabled() bool {

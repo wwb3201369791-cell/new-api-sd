@@ -60,6 +60,13 @@ func TestBuildOpenAIModelFallsBackToCustomForUnknownModels(t *testing.T) {
 	require.Equal(t, "custom", modelItem.OwnedBy)
 }
 
+func TestTaskPluginModelsAreAvailableForModelRetrieval(t *testing.T) {
+	modelItem, ok := openAIModelsMap["doubao-seedance-2.0"]
+	require.True(t, ok)
+	require.Equal(t, "doubao-seedance-2.0", modelItem.Id)
+	require.NotEmpty(t, modelItem.OwnedBy)
+}
+
 func TestGetModelListGroupsUsesUserGroupWhenTokenGroupIsEmpty(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
