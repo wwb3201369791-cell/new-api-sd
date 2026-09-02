@@ -232,6 +232,29 @@ export async function testChannel(
 }
 
 /**
+ * Test the optional Mobile Cloud/Runyuan asset credentials without creating
+ * or changing any provider data. The server performs a read-only list call
+ * against the selected channel and never returns the configured AK/SK.
+ */
+export async function testMobileCloudAssetConnection(id: number): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    channel_id: number
+    channel_name: string
+    provider: string
+    status_code: number
+    upstream_request_id?: string
+  }
+}> {
+  const res = await api.get(
+    `/api/channel/asset-test/${id}`,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+/**
  * Update channel balance
  */
 export async function updateChannelBalance(

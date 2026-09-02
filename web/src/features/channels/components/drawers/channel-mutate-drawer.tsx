@@ -136,6 +136,7 @@ import {
   getPrefillGroups,
   getTaskPluginOptions,
   refreshCodexCredential,
+  testMobileCloudAssetConnection,
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
@@ -644,6 +645,8 @@ export function ChannelMutateDrawer({
   const [channelKey, setChannelKey] = useState<string | null>(null)
   const [isChannelKeyLoading, setIsChannelKeyLoading] = useState(false)
   const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
+    useState(false)
+  const [isAssetConnectionTesting, setIsAssetConnectionTesting] =
     useState(false)
   const initialModelsRef = useRef<string[]>([])
   const initialModelMappingRef = useRef<string>('')
@@ -1469,6 +1472,29 @@ export function ChannelMutateDrawer({
       setIsCodexCredentialRefreshing(false)
     }
   }, [channelId, queryClient, t])
+
+  const handleTestAssetConnection = useCallback(async () => {
+    if (!channelId) {
+      toast.info(t('Save the channel before testing the asset library'))
+      return
+    }
+    setIsAssetConnectionTesting(true)
+    try {
+      const response = await testMobileCloudAssetConnection(channelId)
+      if (!response.success) {
+        throw new Error(response.message || t('Asset library connection failed'))
+      }
+      toast.success(response.message || t('Asset library connection succeeded'))
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Asset library connection failed')
+      )
+    } finally {
+      setIsAssetConnectionTesting(false)
+    }
+  }, [channelId, t])
 
   // Unified function to update models
   const updateModels = useCallback(
@@ -4250,6 +4276,35 @@ export function ChannelMutateDrawer({
                                     </FormItem>
                                   )}
                                 />
+
+                                <div className='flex flex-wrap items-center justify-between gap-3'>
+                                  <p className='text-muted-foreground text-xs'>
+                                    {t(
+                                      'Save the channel before testing. The test only lists one asset group and never changes provider data.'
+                                    )}
+                                  </p>
+                                  <Button
+                                    type='button'
+                                    variant='outline'
+                                    size='sm'
+                                    onClick={() => void handleTestAssetConnection()}
+                                    disabled={
+                                      sensitiveLocked ||
+                                      !isEditing ||
+                                      !currentAssetEnabled ||
+                                      isAssetConnectionTesting
+                                    }
+                                  >
+                                    {isAssetConnectionTesting ? (
+                                      <Loader2 className='animate-spin' />
+                                    ) : (
+                                      <RefreshCw />
+                                    )}
+                                    {isAssetConnectionTesting
+                                      ? t('Testing asset library connection…')
+                                      : t('Test asset library connection')}
+                                  </Button>
+                                </div>
 
                                 <div className='grid gap-4 md:grid-cols-2'>
                                   <FormField

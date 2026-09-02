@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -227,6 +228,67 @@ func GetMobileCloudAssetStorage(c *gin.Context) {
 			"max_bytes":     config.MaxBytes,
 			"allowed_types": []string{"image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm", "video/quicktime", "audio/mpeg", "audio/mp4", "audio/wav", "audio/x-wav", "audio/ogg"},
 		},
+	})
+}
+
+// TestMobileCloudAssetConnection performs a read-only request against the
+// selected task-plugin channel's asset provider.  Video generation uses the
+// channel Bearer key, while the asset library uses its separate AK/SK pair;
+// keeping this check independent makes credential mistakes visible before a
+// user starts an upload or creates an asset group.
+func TestMobileCloudAssetConnection(c *gin.Context) {
+	channelID, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
+	if err != nil || channelID <= 0 {
+		assetAPIError(c, errors.New("channel id must be a positive integer"))
+		return
+	}
+	channel, err := model.GetChannelById(channelID, true)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	if channel == nil {
+		assetAPIError(c, errors.New("channel not found"))
+		return
+	}
+	client, err := mobileCloudAssetClientForChannel(channel)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+
+	requestCtx := context.Background()
+	if c.Request != nil && c.Request.Context() != nil {
+		requestCtx = c.Request.Context()
+	}
+	requestCtx, cancel := context.WithTimeout(requestCtx, 15*time.Second)
+	defer cancel()
+	response, err := client.ListAssetGroups(requestCtx, map[string]any{
+		"pageNo":   1,
+		"pageSize": 1,
+	})
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	if response == nil {
+		assetAPIError(c, errors.New("asset provider returned an empty response"))
+		return
+	}
+
+	data := gin.H{
+		"channel_id":   channel.Id,
+		"channel_name": channel.Name,
+		"provider":     response.Provider,
+		"status_code":  response.StatusCode,
+	}
+	if requestID := providerRequestID(response); requestID != "" {
+		data["upstream_request_id"] = requestID
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "asset library connection succeeded",
+		"data":    data,
 	})
 }
 
@@ -565,26 +627,65 @@ func mobileCloudAssetClient(c *gin.Context) (*mobilecloudasset.Client, *model.Ch
 	if channel == nil {
 		return nil, nil, errors.New("no Mobile Cloud or Runyuan channel with asset AccessKey/SecretKey is configured")
 	}
-	if channel.Type != constant.ChannelTypeTaskPlugin {
-		return nil, nil, errors.New("selected channel must be a task plugin channel")
-	}
-	setting := channel.GetSetting()
-	pluginKey := strings.ToLower(strings.TrimSpace(setting.TaskPluginKey))
-	if pluginKey != "mobilecloud" && pluginKey != "runyuan" {
-		return nil, nil, errors.New("selected channel is not a Mobile Cloud or Runyuan task plugin channel")
-	}
-	if !setting.MobileCloudAssetLibraryEnabled() {
-		return nil, nil, errors.New("asset library is disabled or its credentials are incomplete")
-	}
-	client, err := mobilecloudasset.NewClient(mobilecloudasset.Config{
-		Provider: pluginKey,
-		BaseURL:  setting.AssetBaseURL, AccessKey: setting.AssetAccessKey, SecretKey: setting.AssetSecretKey,
-		ResourcePool: setting.AssetResourcePool,
-	})
+	client, err := mobileCloudAssetClientForChannel(channel)
 	if err != nil {
 		return nil, nil, err
 	}
 	return client, channel, nil
+}
+
+func mobileCloudAssetClientForChannel(channel *model.Channel) (*mobilecloudasset.Client, error) {
+	if channel == nil {
+		return nil, errors.New("channel not found")
+	}
+	if channel.Type != constant.ChannelTypeTaskPlugin {
+		return nil, errors.New("selected channel must be a task plugin channel")
+	}
+	setting := channel.GetSetting()
+	pluginKey := strings.ToLower(strings.TrimSpace(setting.TaskPluginKey))
+	if pluginKey != "mobilecloud" && pluginKey != "runyuan" {
+		return nil, errors.New("selected channel is not a Mobile Cloud or Runyuan task plugin channel")
+	}
+	if err := setting.ValidateMobileCloudAssets(); err != nil {
+		return nil, err
+	}
+	if !setting.MobileCloudAssetLibraryEnabled() {
+		return nil, errors.New("asset library is disabled or its credentials are incomplete")
+	}
+	return mobilecloudasset.NewClient(mobilecloudasset.Config{
+		Provider: pluginKey,
+		BaseURL:  setting.AssetBaseURL, AccessKey: setting.AssetAccessKey, SecretKey: setting.AssetSecretKey,
+		ResourcePool: setting.AssetResourcePool,
+	})
+}
+
+func providerRequestID(response *mobilecloudasset.Response) string {
+	if response == nil {
+		return ""
+	}
+	if response.Header != nil {
+		for _, key := range []string{"X-Request-Id", "X-Request-ID", "Request-Id", "Request-ID", "X-Tt-Logid"} {
+			if value := strings.TrimSpace(response.Header.Get(key)); value != "" {
+				return value
+			}
+		}
+	}
+	var envelope map[string]any
+	if common.Unmarshal(response.Body, &envelope) == nil {
+		for _, key := range []string{"requestId", "requestID", "request_id", "RequestId", "RequestID"} {
+			if value := stringValue(envelope[key]); value != "" {
+				return value
+			}
+		}
+		if metadata, ok := envelope["ResponseMetadata"].(map[string]any); ok {
+			for _, key := range []string{"RequestId", "RequestID", "requestId", "requestID", "request_id"} {
+				if value := stringValue(metadata[key]); value != "" {
+					return value
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func readAssetJSON(c *gin.Context) (map[string]any, error) {
