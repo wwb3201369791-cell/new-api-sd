@@ -898,6 +898,8 @@ func restrictProviderValue(value any, allowed map[string]struct{}, idKey string)
 			}
 		}
 		out := make(map[string]any, len(current))
+		filteredList := false
+		filteredCount := 0
 		for key, nested := range current {
 			filtered, keep := restrictProviderValue(nested, allowed, idKey)
 			if !keep && (key == "data" || key == "list" || key == "items" || key == "records" || key == "results" || key == "body" || key == "Result" || key == "result") {
@@ -907,7 +909,20 @@ func restrictProviderValue(value any, allowed map[string]struct{}, idKey string)
 				continue
 			}
 			if keep {
+				if originalItems, ok := nested.([]any); ok {
+					if filteredItems, ok := filtered.([]any); ok && len(filteredItems) < len(originalItems) {
+						filteredList = true
+						filteredCount = len(filteredItems)
+					}
+				}
 				out[key] = filtered
+			}
+		}
+		if filteredList {
+			for _, key := range []string{"total", "totalCount", "TotalCount"} {
+				if _, exists := out[key]; exists {
+					out[key] = filteredCount
+				}
 			}
 		}
 		return out, true

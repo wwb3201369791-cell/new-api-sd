@@ -83,6 +83,7 @@ func TestRestrictProviderResponseFiltersRunyuanPascalCaseGroups(t *testing.T) {
 	require.Contains(t, string(response.Body), `"asset-1"`)
 	require.NotContains(t, string(response.Body), `"asset-2"`)
 	require.NotContains(t, string(response.Body), `"foreign"`)
+	require.Contains(t, string(response.Body), `"TotalCount":1`)
 }
 
 func TestEnsureMobileCloudDefaultGroupIsCreatedOnce(t *testing.T) {
