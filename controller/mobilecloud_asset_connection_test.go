@@ -102,3 +102,43 @@ func TestTestMobileCloudAssetConnectionRejectsDisabledLibrary(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "asset library is disabled")
 }
+
+func TestTestMobileCloudAssetConnectionMapsUpstreamDisconnectToBadGateway(t *testing.T) {
+	setupMobileCloudAssetConnectionTestDB(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		require.True(t, ok)
+		connection, _, err := hijacker.Hijack()
+		require.NoError(t, err)
+		require.NoError(t, connection.Close())
+	}))
+	defer upstream.Close()
+
+	enabled := true
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeTaskPlugin,
+		Name:    "mobilecloud-asset-disconnect",
+		Key:     "VIDEO_BEARER_KEY",
+		BaseURL: &upstream.URL,
+	}
+	channel.SetSetting(dto.ChannelSettings{
+		TaskPluginKey:  "mobilecloud",
+		AssetEnabled:   &enabled,
+		AssetBaseURL:   upstream.URL,
+		AssetAccessKey: "ASSET_AK",
+		AssetSecretKey: "ASSET_SK",
+	})
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "1"}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/channel/asset-test/1", nil)
+	TestMobileCloudAssetConnection(ctx)
+
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"code":"ASSET_PROVIDER_UNREACHABLE"`)
+	assert.Contains(t, recorder.Body.String(), "asset provider connection failed")
+	assert.NotContains(t, recorder.Body.String(), "ASSET_AK")
+	assert.NotContains(t, recorder.Body.String(), "ASSET_SK")
+}

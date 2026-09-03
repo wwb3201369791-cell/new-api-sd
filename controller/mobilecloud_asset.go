@@ -16,6 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/assetstore"
 	mobilecloudasset "github.com/QuantumNous/new-api/service/mobilecloudasset"
@@ -372,8 +373,9 @@ func TestMobileCloudAssetConnection(c *gin.Context) {
 	requestCtx, cancel := context.WithTimeout(requestCtx, 15*time.Second)
 	defer cancel()
 	response, err := client.ListAssetGroups(requestCtx, map[string]any{
-		"pageNo":   1,
-		"pageSize": 1,
+		"pageNo":    1,
+		"pageSize":  1,
+		"groupType": "AIGC",
 	})
 	if err != nil {
 		assetAPIError(c, err)
@@ -1306,24 +1308,44 @@ func assetAPIResponse(c *gin.Context, response *mobilecloudasset.Response) {
 func assetAPIError(c *gin.Context, err error) {
 	message := "asset provider request failed"
 	status := http.StatusBadRequest
+	code := ""
 	var ownershipErr *assetOwnershipError
 	if errors.As(err, &ownershipErr) {
 		status = http.StatusNotFound
-	}
-	var providerErr *mobilecloudasset.ProviderError
-	if errors.As(err, &providerErr) && providerErr != nil {
-		message = providerErr.Error()
-		status = providerErr.StatusCode
-		if status < 400 || status > 599 {
-			status = http.StatusBadGateway
-		} else if status >= 500 {
-			status = http.StatusBadGateway
+	} else {
+		var transportErr *mobilecloudasset.TransportError
+		if errors.As(err, &transportErr) && transportErr != nil {
+			if transportErr.IsTimeout() {
+				status = http.StatusGatewayTimeout
+				code = "ASSET_PROVIDER_TIMEOUT"
+				message = "asset provider request timed out; check the upstream endpoint and network path"
+			} else {
+				status = http.StatusBadGateway
+				code = "ASSET_PROVIDER_UNREACHABLE"
+				message = "asset provider connection failed; check server egress, DNS/TLS, or provider allowlist"
+			}
+			logger.LogWarn(c.Request.Context(), "asset provider transport error provider=%s method=%s path=%s timeout=%t cause=%s", transportErr.Provider, transportErr.Method, transportErr.Path, transportErr.IsTimeout(), transportErr.CauseType())
+		} else {
+			var providerErr *mobilecloudasset.ProviderError
+			if errors.As(err, &providerErr) && providerErr != nil {
+				message = providerErr.Error()
+				status = providerErr.StatusCode
+				code = "ASSET_PROVIDER_ERROR"
+				if status < 400 || status > 599 {
+					status = http.StatusBadGateway
+				} else if status >= 500 {
+					status = http.StatusBadGateway
+				}
+			} else if err != nil && strings.TrimSpace(err.Error()) != "" {
+				message = err.Error()
+			}
 		}
 	}
-	if err != nil && strings.TrimSpace(err.Error()) != "" {
-		message = err.Error()
+	response := gin.H{"success": false, "message": message}
+	if code != "" {
+		response["code"] = code
 	}
-	c.JSON(status, gin.H{"success": false, "message": message})
+	c.JSON(status, response)
 }
 
 func providerResponseValue(response *mobilecloudasset.Response) any {

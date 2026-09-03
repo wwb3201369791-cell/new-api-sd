@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,6 +59,52 @@ type ProviderError struct {
 	StatusCode int
 	Code       string
 	Message    string
+}
+
+// TransportError represents a request that did not receive an HTTP response
+// from the upstream asset provider. Keep the original error for retry and
+// timeout classification, but never include it in the user-facing message:
+// net/http errors can contain the signed URL and therefore the AccessKey.
+type TransportError struct {
+	Provider string
+	Method   string
+	Path     string
+	Err      error
+}
+
+func (e *TransportError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.IsTimeout() {
+		return "asset provider request timed out"
+	}
+	return "asset provider connection failed"
+}
+
+func (e *TransportError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *TransportError) IsTimeout() bool {
+	if e == nil || e.Err == nil {
+		return false
+	}
+	if errors.Is(e.Err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(e.Err, &netErr) && netErr.Timeout()
+}
+
+func (e *TransportError) CauseType() string {
+	if e == nil || e.Err == nil {
+		return "unknown"
+	}
+	return fmt.Sprintf("%T", e.Err)
 }
 
 func (e *ProviderError) Error() string {
@@ -149,12 +196,12 @@ func (c *Client) Do(ctx context.Context, method, path string, payload any, param
 	}
 	response, err := c.client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, &TransportError{Provider: c.config.Provider, Method: method, Path: path, Err: err}
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, &TransportError{Provider: c.config.Provider, Method: method, Path: path, Err: err}
 	}
 	result := &Response{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: data, Provider: c.config.Provider}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -218,12 +265,12 @@ func (c *Client) doRunyuan(ctx context.Context, action string, payload any) (*Re
 	request.Header.Set("Authorization", "HMAC-SHA256 Credential="+c.config.AccessKey+"/"+credentialScope+", SignedHeaders=content-type;host;x-content-sha256;x-date, Signature="+signature)
 	response, err := c.client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, &TransportError{Provider: c.config.Provider, Method: http.MethodPost, Path: "/v1/video", Err: err}
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, &TransportError{Provider: c.config.Provider, Method: http.MethodPost, Path: "/v1/video", Err: err}
 	}
 	result := &Response{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: data, Provider: c.config.Provider}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {

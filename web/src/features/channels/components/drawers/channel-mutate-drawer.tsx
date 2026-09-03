@@ -122,6 +122,7 @@ import {
   parseChannelConnectionInfo,
   type ChannelConnectionInfo,
 } from '@/lib/channel-connection-info'
+import { getApiErrorMessage } from '@/lib/api-error-message'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
@@ -1487,9 +1488,8 @@ export function ChannelMutateDrawer({
       toast.success(response.message || t('Asset library connection succeeded'))
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : t('Asset library connection failed')
+        getApiErrorMessage(error) ||
+          t('Asset library connection failed')
       )
     } finally {
       setIsAssetConnectionTesting(false)
