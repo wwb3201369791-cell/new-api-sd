@@ -86,10 +86,16 @@ ID，因而可以用“网关请求 ID → 上游请求 ID → 任务 ID”定�
 - `POST /api/mobilecloud/billing/deductions/export`
 - `GET /api/mobilecloud/billing/deductions/export/:task_id`
 
+以上素材组/素材接口同时提供 `/v1/asset-groups` 和 `/v1/assets` 厂商无关别名。
+每个客户的默认 AIGC 素材组按需自动创建；创建素材时省略 `groupId` 会自动
+使用该默认组。显式传入的组 ID 必须属于当前客户和当前渠道，其他客户的资源
+会返回 404。
+
 网关按移动云 V2.0 规则签名（HMAC-SHA1，支持 HMAC-SHA256），并保留一份
-脱敏后的本地索引。除了直接传入公网 URL，网页端还可通过
-`POST /api/mobilecloud/uploads` 上传本地图片、视频或音频：文件先写入本地
-目录或 S3 兼容对象存储，再以公网 URL 注册到移动云。对象存储由
+脱敏后的本地索引。生产 ToB 模式建议只提交公网 URL；网关默认关闭 multipart
+上传。确需网页端代传时，显式设置 `ASSET_STORAGE_ALLOW_UPLOAD=true`，此时
+`POST /api/mobilecloud/uploads` 才会将本地图片、视频或音频写入本地目录或
+S3 兼容对象存储，再以公网 URL 注册到移动云。对象存储由
 `ASSET_STORAGE_MODE=local|s3` 选择，S3 模式兼容 MinIO、R2、OSS 等服务。
 移动云会将对象下载到其 EOS 存储并返回约 12 小时有效的预签名 URL；真人
 素材组必须经过官方活体认证流程，网关只转发认证会话和 Token 查询，不绕过

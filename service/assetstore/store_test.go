@@ -9,6 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLoadConfigDefaultsToURLOnlyUploads(t *testing.T) {
+	t.Setenv("ASSET_STORAGE_ALLOW_UPLOAD", "")
+	config := LoadConfig()
+	require.NotNil(t, config.UploadsEnabled)
+	require.False(t, *config.UploadsEnabled)
+}
+
 func TestLocalStoreUploadsAndDeletesObject(t *testing.T) {
 	dir := t.TempDir()
 	store, err := New(Config{

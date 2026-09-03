@@ -1,9 +1,16 @@
 package controller
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/model"
+	mobilecloudasset "github.com/QuantumNous/new-api/service/mobilecloudasset"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestProviderItemsUnwrapsMobileCloudPagination(t *testing.T) {
@@ -60,4 +67,55 @@ func TestNormalizeRunyuanAssetListPreservesPagination(t *testing.T) {
 	require.Len(t, items, 1)
 	require.Equal(t, "asset-1", items[0].(map[string]any)["assetId"])
 	require.Equal(t, "https://example.com/hero.png", items[0].(map[string]any)["assetUrl"])
+}
+
+func TestRestrictProviderResponseFiltersForeignGroups(t *testing.T) {
+	response := &mobilecloudasset.Response{Body: []byte(`{"requestId":"req-1","state":"OK","body":{"data":[{"groupId":"owned","assetId":"asset-1"},{"groupId":"foreign","assetId":"asset-2"}],"total":2}}`)}
+	restrictProviderResponse(response, map[string]struct{}{"owned": {}}, "groupId")
+	require.Contains(t, string(response.Body), `"asset-1"`)
+	require.NotContains(t, string(response.Body), `"asset-2"`)
+	require.NotContains(t, string(response.Body), `"foreign"`)
+}
+
+func TestRestrictProviderResponseFiltersRunyuanPascalCaseGroups(t *testing.T) {
+	response := &mobilecloudasset.Response{Provider: "runyuan", Body: []byte(`{"ResponseMetadata":{"Action":"ListAssets"},"Result":{"Items":[{"Id":"asset-1","GroupId":"owned"},{"Id":"asset-2","GroupId":"foreign"}],"TotalCount":2}}`)}
+	restrictProviderResponse(response, map[string]struct{}{"owned": {}}, "groupId")
+	require.Contains(t, string(response.Body), `"asset-1"`)
+	require.NotContains(t, string(response.Body), `"asset-2"`)
+	require.NotContains(t, string(response.Body), `"foreign"`)
+}
+
+func TestEnsureMobileCloudDefaultGroupIsCreatedOnce(t *testing.T) {
+	originalDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, database.AutoMigrate(&model.MobileCloudAssetGroup{}, &model.MobileCloudAsset{}))
+	model.DB = database
+	t.Cleanup(func() { model.DB = originalDB })
+
+	requests := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		require.Equal(t, "/api/openapi-maas/exp/aicc/v2/asset-group", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"requestId":"req-1","state":"OK","body":{"groupId":"group-default","groupType":"AIGC","groupName":"customer-7-default"}}`))
+	}))
+	defer upstream.Close()
+	client, err := mobilecloudasset.NewClient(mobilecloudasset.Config{BaseURL: upstream.URL, AccessKey: "ak", SecretKey: "sk"})
+	require.NoError(t, err)
+
+	first, err := ensureMobileCloudDefaultGroup(context.Background(), 7, 11, client)
+	require.NoError(t, err)
+	second, err := ensureMobileCloudDefaultGroup(context.Background(), 7, 11, client)
+	require.NoError(t, err)
+	require.Equal(t, "group-default", first)
+	require.Equal(t, first, second)
+	require.Equal(t, 1, requests)
+	var groups []model.MobileCloudAssetGroup
+	require.NoError(t, model.DB.Find(&groups).Error)
+	require.Len(t, groups, 1)
+	require.True(t, groups[0].IsDefault)
 }

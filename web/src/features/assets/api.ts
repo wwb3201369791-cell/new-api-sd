@@ -1,7 +1,7 @@
 import { api, type ApiRequestConfig } from '@/lib/api'
 
-import type { Asset, AssetGroup, StorageInfo, UploadResult } from './types'
 import { normalizeAssets, normalizeGroups } from './lib/normalize'
+import type { AssetType, StorageInfo, UploadResult } from './types'
 
 type ApiResponse<T> = {
   success: boolean
@@ -27,10 +27,9 @@ export async function getStorageInfo() {
 }
 
 export async function listAssetGroups() {
-  const response = await api.get<ApiResponse<unknown>>(
-    '/api/mobilecloud/asset-groups',
-    { params: { page: 1, page_size: 100 } }
-  )
+  const response = await api.get<ApiResponse<unknown>>('/v1/asset-groups', {
+    params: { page: 1, page_size: 100 },
+  })
   return normalizeGroups(requireSuccess(response.data))
 }
 
@@ -39,7 +38,7 @@ export async function createAssetGroup(input: {
   description?: string
 }) {
   const response = await api.post<ApiResponse<unknown>>(
-    '/api/mobilecloud/asset-groups',
+    '/v1/asset-groups',
     { groupType: 'AIGC', ...input },
     mutationConfig
   )
@@ -48,22 +47,45 @@ export async function createAssetGroup(input: {
 
 export async function deleteAssetGroup(groupId: string) {
   const response = await api.delete<ApiResponse<unknown>>(
-    `/api/mobilecloud/asset-groups/${encodeURIComponent(groupId)}`,
+    `/v1/asset-groups/${encodeURIComponent(groupId)}`,
     mutationConfig
   )
   return requireSuccess(response.data)
 }
 
 export async function listAssets(groupId?: string) {
-  const response = await api.get<ApiResponse<unknown>>('/api/mobilecloud/assets', {
-    params: { page: 1, page_size: 100, ...(groupId ? { group_id: groupId } : {}) },
+  const response = await api.get<ApiResponse<unknown>>('/v1/assets', {
+    params: {
+      page: 1,
+      page_size: 100,
+      ...(groupId ? { group_id: groupId } : {}),
+    },
   })
   return normalizeAssets(requireSuccess(response.data))
 }
 
+export async function createAsset(input: {
+  groupId?: string
+  assetName: string
+  assetUrl: string
+  assetType: AssetType
+}) {
+  const response = await api.post<ApiResponse<unknown>>(
+    '/v1/assets',
+    {
+      ...(input.groupId ? { groupId: input.groupId } : {}),
+      assetName: input.assetName,
+      assetUrl: input.assetUrl,
+      assetType: input.assetType,
+    },
+    mutationConfig
+  )
+  return requireSuccess(response.data)
+}
+
 export async function deleteAsset(assetId: string) {
   const response = await api.delete<ApiResponse<unknown>>(
-    `/api/mobilecloud/assets/${encodeURIComponent(assetId)}`,
+    `/v1/assets/${encodeURIComponent(assetId)}`,
     mutationConfig
   )
   return requireSuccess(response.data)

@@ -5595,9 +5595,18 @@
     "Choose a file first": "Choose a file first",
     "Loading assets…": "Loading assets…",
     "Unable to load assets": "Unable to load assets",
-    "No assets yet. Upload the first one above.": "No assets yet. Upload the first one above.",
+    "No assets yet. Register a public URL above.": "No assets yet. Register a public URL above.",
     "Delete this asset?": "Delete this asset?",
     "All assets": "All assets",
-    "Audio preview": "Audio preview"
+    "Audio preview": "Audio preview",
+    "Register public asset URL": "Register public asset URL",
+    "Public asset URL": "Public asset URL",
+    "Enter a public asset URL first": "Enter a public asset URL first",
+    "The provider downloads this URL asynchronously; the gateway does not store the file.": "The provider downloads this URL asynchronously; the gateway does not store the file.",
+    "Registering…": "Registering…",
+    "Register URL": "Register URL",
+    "Local uploads are enabled by the administrator and are staged before provider registration.": "Local uploads are enabled by the administrator and are staged before provider registration.",
+    "Local uploads are disabled; submit a public asset URL above.": "Local uploads are disabled; submit a public asset URL above.",
+    "Asset registration submitted": "Asset registration submitted"
   }
 }

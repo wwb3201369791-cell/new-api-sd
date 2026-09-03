@@ -68,13 +68,13 @@ existing server address setting) before enabling this response path.
 
 Enable **Mobile Cloud asset library** in the channel's Advanced settings and
 enter the separate `asset_access_key` and `asset_secret_key` credentials.
-Authenticated user APIs under `/api/mobilecloud/asset-groups` and
-`/api/mobilecloud/assets` then proxy the official signed OpenAPI. The web
-Asset Library page also supports local multipart upload through
-`POST /api/mobilecloud/uploads`; the gateway stores the bytes in local disk or
-an S3-compatible backend and registers the resulting public URL with the
-selected Mobile Cloud group. Configure `ASSET_STORAGE_PUBLIC_URL` (or the
-gateway's public address) so the upstream can fetch local objects. The
+Authenticated user APIs under `/v1/asset-groups` and `/v1/assets` (the legacy
+`/api/mobilecloud/*` paths remain available) proxy the official signed OpenAPI.
+Production ToB deployments use public `assetUrl` values directly. Multipart
+upload is disabled by default; set `ASSET_STORAGE_ALLOW_UPLOAD=true` only when
+the dashboard must stage local files in local disk or an S3-compatible backend
+and register the resulting public URL with the selected Mobile Cloud group.
+Configure `ASSET_STORAGE_PUBLIC_URL` (or the gateway's public address) so the upstream can fetch local objects. The
 gateway also supports the real-person verification session/token flow and
 the upstream usage/deduction query/export endpoints under
 `/api/mobilecloud/billing`. Existing channels without `asset_enabled` keep

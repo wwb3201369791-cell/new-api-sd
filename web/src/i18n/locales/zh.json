@@ -5595,9 +5595,18 @@
     "Choose a file first": "请先选择文件",
     "Loading assets…": "正在加载素材…",
     "Unable to load assets": "无法加载素材",
-    "No assets yet. Upload the first one above.": "暂无素材，请先上传一个素材。",
+    "No assets yet. Register a public URL above.": "暂无素材，请先登记上方的公网 URL。",
     "Delete this asset?": "确定删除这个素材吗？",
     "All assets": "全部素材",
-    "Audio preview": "音频预览"
+    "Audio preview": "音频预览",
+    "Register public asset URL": "登记公网素材 URL",
+    "Public asset URL": "公网素材 URL",
+    "Enter a public asset URL first": "请先输入公网素材 URL",
+    "The provider downloads this URL asynchronously; the gateway does not store the file.": "厂商会异步下载此地址，网关不会保存文件。",
+    "Registering…": "登记中…",
+    "Register URL": "登记 URL",
+    "Local uploads are enabled by the administrator and are staged before provider registration.": "管理员已启用本地上传，文件会暂存后再登记到上游。",
+    "Local uploads are disabled; submit a public asset URL above.": "本地上传已关闭，请提交上方的公网素材 URL。",
+    "Asset registration submitted": "素材登记请求已提交"
   }
 }

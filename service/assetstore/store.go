@@ -39,7 +39,11 @@ var (
 )
 
 type Config struct {
-	Mode           string
+	Mode string
+	// UploadsEnabled controls gateway-side multipart staging. A nil value in
+	// programmatic configs keeps the historical behavior (enabled); the
+	// environment-backed production config defaults to URL-only mode.
+	UploadsEnabled *bool
 	LocalDir       string
 	PublicURL      string
 	S3Endpoint     string
@@ -71,8 +75,10 @@ func LoadConfig() Config {
 	if maxMB < 1 {
 		maxMB = int(DefaultMaxBytes / (1 << 20))
 	}
+	uploadsEnabled := common.GetEnvOrDefaultBool("ASSET_STORAGE_ALLOW_UPLOAD", false)
 	return Config{
 		Mode:           strings.ToLower(strings.TrimSpace(common.GetEnvOrDefaultString("ASSET_STORAGE_MODE", ModeLocal))),
+		UploadsEnabled: &uploadsEnabled,
 		LocalDir:       common.GetEnvOrDefaultString("ASSET_STORAGE_DIR", filepath.Join("data", "assets")),
 		PublicURL:      strings.TrimRight(strings.TrimSpace(common.GetEnvOrDefaultString("ASSET_STORAGE_PUBLIC_URL", "")), "/"),
 		S3Endpoint:     strings.TrimSpace(common.GetEnvOrDefaultString("ASSET_STORAGE_S3_ENDPOINT", "")),
@@ -120,7 +126,14 @@ func New(config Config) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{config: config}
+	if store.config.UploadsEnabled == nil {
+		enabled := true
+		store.config.UploadsEnabled = &enabled
+	}
 	if config.Mode == ModeLocal {
+		if !store.UploadsEnabled() {
+			return store, nil
+		}
 		if err := os.MkdirAll(config.LocalDir, 0o750); err != nil {
 			return nil, fmt.Errorf("create asset storage directory: %w", err)
 		}
@@ -140,6 +153,10 @@ func New(config Config) (*Store, error) {
 }
 
 func (s *Store) Config() Config { return s.config }
+
+func (s *Store) UploadsEnabled() bool {
+	return s != nil && s.config.UploadsEnabled != nil && *s.config.UploadsEnabled
+}
 
 func (s *Store) Upload(ctx context.Context, reader io.Reader, originalName, contentType string, size int64) (Object, error) {
 	if s == nil {

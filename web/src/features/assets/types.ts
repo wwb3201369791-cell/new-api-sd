@@ -21,6 +21,7 @@ export type Asset = {
 
 export type StorageInfo = {
   enabled: boolean
+  upload_enabled: boolean
   mode: 'local' | 's3'
   max_bytes: number
   allowed_types: string[]
@@ -38,4 +39,3 @@ export type UploadResult = {
   asset?: unknown
   provider_error?: string
 }
-

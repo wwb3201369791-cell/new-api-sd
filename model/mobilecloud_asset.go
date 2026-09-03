@@ -16,6 +16,7 @@ type MobileCloudAssetGroup struct {
 	UserID          int    `json:"user_id" gorm:"index"`
 	ChannelID       int    `json:"channel_id" gorm:"index"`
 	ProviderGroupID string `json:"provider_group_id" gorm:"column:provider_group_id;type:varchar(191);index"`
+	IsDefault       bool   `json:"is_default" gorm:"index"`
 	GroupType       string `json:"group_type" gorm:"type:varchar(32)"`
 	Name            string `json:"name" gorm:"type:varchar(191)"`
 	Description     string `json:"description" gorm:"type:text"`
@@ -109,6 +110,70 @@ func GetMobileCloudAsset(ctx context.Context, userID int, id int64) (*MobileClou
 		return nil, nil
 	}
 	return &item, err
+}
+
+// FindMobileCloudAssetGroupByProviderID resolves a provider group only within
+// the current customer and channel. Provider IDs are not globally trusted:
+// this lookup is the ownership boundary used by the proxy before forwarding
+// get/update/delete requests upstream.
+func FindMobileCloudAssetGroupByProviderID(ctx context.Context, userID, channelID int, providerID string) (*MobileCloudAssetGroup, error) {
+	var item MobileCloudAssetGroup
+	query := DB.WithContext(ctx).Where("user_id = ? AND provider_group_id = ?", userID, providerID)
+	if channelID > 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+	err := query.First(&item).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &item, err
+}
+
+func FindMobileCloudAssetByProviderID(ctx context.Context, userID, channelID int, providerID string) (*MobileCloudAsset, error) {
+	var item MobileCloudAsset
+	query := DB.WithContext(ctx).Where("user_id = ? AND provider_asset_id = ?", userID, providerID)
+	if channelID > 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+	err := query.First(&item).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &item, err
+}
+
+func FindDefaultMobileCloudAssetGroup(ctx context.Context, userID, channelID int) (*MobileCloudAssetGroup, error) {
+	var item MobileCloudAssetGroup
+	err := DB.WithContext(ctx).
+		Where("user_id = ? AND channel_id = ? AND is_default = ?", userID, channelID, true).
+		Order("id asc").First(&item).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &item, err
+}
+
+func MarkMobileCloudAssetGroupDefault(ctx context.Context, userID, channelID int, providerID string) error {
+	tx := DB.WithContext(ctx).Model(&MobileCloudAssetGroup{}).
+		Where("user_id = ? AND channel_id = ?", userID, channelID).
+		Update("is_default", false)
+	if tx.Error != nil {
+		return tx.Error
+	}
+	return DB.WithContext(ctx).Model(&MobileCloudAssetGroup{}).
+		Where("user_id = ? AND channel_id = ? AND provider_group_id = ?", userID, channelID, providerID).
+		Update("is_default", true).Error
+}
+
+func DeleteMobileCloudAssetGroupIndex(ctx context.Context, userID, channelID int, providerID string) error {
+	if err := DB.WithContext(ctx).Where("user_id = ? AND channel_id = ? AND provider_group_id = ?", userID, channelID, providerID).Delete(&MobileCloudAssetGroup{}).Error; err != nil {
+		return err
+	}
+	return DB.WithContext(ctx).Where("user_id = ? AND channel_id = ? AND provider_group_id = ?", userID, channelID, providerID).Delete(&MobileCloudAsset{}).Error
+}
+
+func DeleteMobileCloudAssetIndex(ctx context.Context, userID, channelID int, providerID string) error {
+	return DB.WithContext(ctx).Where("user_id = ? AND channel_id = ? AND provider_asset_id = ?", userID, channelID, providerID).Delete(&MobileCloudAsset{}).Error
 }
 
 func TouchMobileCloudAssetGroup(group *MobileCloudAssetGroup) {

@@ -41,6 +41,31 @@ func SetRelayRouter(router *gin.Engine) {
 		})
 	}
 
+	// Provider-neutral asset management aliases. The legacy /api/mobilecloud
+	// paths remain available for dashboard compatibility, while external ToB
+	// clients can use the same /v1 namespace as the Ark-compatible video API.
+	assetV1Router := router.Group("/v1")
+	assetV1Router.Use(middleware.RouteTag("relay"))
+	assetV1Router.Use(middleware.TokenOrUserAuth())
+	{
+		assetV1Router.GET("/asset-groups", controller.ListMobileCloudAssetGroups)
+		assetV1Router.POST("/asset-groups", controller.CreateMobileCloudAssetGroup)
+		assetV1Router.GET("/asset-groups/:group_id", controller.GetMobileCloudAssetGroup)
+		assetV1Router.PUT("/asset-groups/:group_id", controller.UpdateMobileCloudAssetGroup)
+		assetV1Router.DELETE("/asset-groups/:group_id", controller.DeleteMobileCloudAssetGroup)
+		assetV1Router.GET("/assets", controller.ListMobileCloudAssets)
+		assetV1Router.POST("/assets", controller.CreateMobileCloudAsset)
+		assetV1Router.GET("/assets/:asset_id", controller.GetMobileCloudAsset)
+		assetV1Router.PUT("/assets/:asset_id", controller.UpdateMobileCloudAsset)
+		assetV1Router.DELETE("/assets/:asset_id", controller.DeleteMobileCloudAsset)
+		assetV1Router.POST("/real-person-auth/sessions", controller.CreateMobileCloudRealPersonSession)
+		assetV1Router.POST("/real-person-auth/asset-group/by-byted-token", controller.GetMobileCloudAssetGroupByBytedToken)
+		assetV1Router.POST("/billing/tokens/consumed", controller.QueryMobileCloudModelTokensConsumed)
+		assetV1Router.POST("/billing/deductions", controller.QueryMobileCloudAiccCreditDeduction)
+		assetV1Router.POST("/billing/deductions/export", controller.CreateMobileCloudAiccDeductionExportTask)
+		assetV1Router.GET("/billing/deductions/export/:task_id", controller.GetMobileCloudAiccDeductionExportTask)
+	}
+
 	geminiRouter := router.Group("/v1beta/models")
 	geminiRouter.Use(middleware.RouteTag("relay"))
 	geminiRouter.Use(middleware.TokenAuth())
