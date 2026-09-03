@@ -449,8 +449,10 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 	snap := task.Snapshot()
 	resp, err := fetchTaskWithRetry(ctx, adaptor, baseURL, key, map[string]any{
-		"task_id": task.GetUpstreamTaskID(),
-		"action":  constant.NormalizeTaskAction(task.Action),
+		"task_id":        task.GetUpstreamTaskID(),
+		"action":         constant.NormalizeTaskAction(task.Action),
+		"model":          task.Properties.OriginModelName,
+		"upstream_model": task.Properties.UpstreamModelName,
 	}, proxy)
 	if err != nil {
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
