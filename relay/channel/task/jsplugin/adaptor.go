@@ -645,6 +645,9 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 	}
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
 	}
 	started := time.Now()
