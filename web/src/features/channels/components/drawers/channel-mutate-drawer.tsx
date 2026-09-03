@@ -118,11 +118,11 @@ import {
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
+import { getApiErrorMessage } from '@/lib/api-error-message'
 import {
   parseChannelConnectionInfo,
   type ChannelConnectionInfo,
 } from '@/lib/channel-connection-info'
-import { getApiErrorMessage } from '@/lib/api-error-message'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
@@ -967,9 +967,9 @@ export function ChannelMutateDrawer({
   const assetCredentialsConfigured = useMemo(() => {
     return Boolean(
       typeof currentSettingRecord.asset_access_key === 'string' &&
-        currentSettingRecord.asset_access_key.trim() &&
-        typeof currentSettingRecord.asset_secret_key === 'string' &&
-        currentSettingRecord.asset_secret_key.trim()
+      currentSettingRecord.asset_access_key.trim() &&
+      typeof currentSettingRecord.asset_secret_key === 'string' &&
+      currentSettingRecord.asset_secret_key.trim()
     )
   }, [currentSettingRecord])
   const taskPluginOptionsQuery = useQuery({
@@ -1483,13 +1483,14 @@ export function ChannelMutateDrawer({
     try {
       const response = await testMobileCloudAssetConnection(channelId)
       if (!response.success) {
-        throw new Error(response.message || t('Asset library connection failed'))
+        throw new Error(
+          response.message || t('Asset library connection failed')
+        )
       }
       toast.success(response.message || t('Asset library connection succeeded'))
     } catch (error) {
       toast.error(
-        getApiErrorMessage(error) ||
-          t('Asset library connection failed')
+        getApiErrorMessage(error) || t('Asset library connection failed')
       )
     } finally {
       setIsAssetConnectionTesting(false)
@@ -4259,7 +4260,9 @@ export function ChannelMutateDrawer({
                                     <FormItem className='flex items-center justify-between gap-3 rounded-md border px-3 py-3'>
                                       <div className='space-y-0.5'>
                                         <FormLabel className='text-sm'>
-                                          {t('Enable Mobile Cloud asset library')}
+                                          {t(
+                                            'Enable Mobile Cloud asset library'
+                                          )}
                                         </FormLabel>
                                         <FormDescription>
                                           {t(
@@ -4287,7 +4290,9 @@ export function ChannelMutateDrawer({
                                     type='button'
                                     variant='outline'
                                     size='sm'
-                                    onClick={() => void handleTestAssetConnection()}
+                                    onClick={() =>
+                                      void handleTestAssetConnection()
+                                    }
                                     disabled={
                                       sensitiveLocked ||
                                       !isEditing ||
