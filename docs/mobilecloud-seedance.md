@@ -132,6 +132,9 @@ provider 插件，复用列表/取消/删除/素材控制器，只实现其鉴�
 替代真实计费任务的端到端验收。上线前应使用测试账户验证：创建任务、轮询成功、
 视频代理、取消退款、创建素材、查询素材和预签名 URL 访问。
 
+移动云素材库的上游直连查询、创建、精确查询和清理命令，见
+[移动云素材库 curl 测试指南](mobilecloud-asset-curl.md)。
+
 可直接运行 `pwsh -File e2e/mobilecloud-seedance.ps1 -BaseUrl
 https://HOST -Token TOKEN` 做真实网关验收。脚本不会接触或输出移动云密钥；
 移动云 Bearer key 必须先在后台的 `mobilecloud` 渠道中配置。
