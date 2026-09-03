@@ -41,6 +41,18 @@ $env:MOBILECLOUD_SECRET_KEY = "SECRET_KEY"
 
 SecretKey 只放在本机环境变量中，不要提交到 Git、工单或公开聊天记录。
 
+仓库同时提供了不回显密钥、默认只读查询的一键脚本。Windows 双击
+`scripts\run_mobilecloud_asset_test.bat`，或在 PowerShell 执行：
+
+```powershell
+cd new-api
+.\scripts\run_mobilecloud_asset_test.ps1
+```
+
+脚本会依次输出本机主机名、出口 IP、DNS、TLS 握手、上游 HTTP 状态和响应体；
+不会打印签名 URL、SecretKey，也不会默认创建或删除素材组。需要验证创建/删除
+时再显式执行 `--operation create --cleanup --yes`。
+
 ## 3. 第一步：无签名连通性探针
 
 此请求只检查网络和接口入口，不会创建或修改素材组：
@@ -289,4 +301,3 @@ python3 mobilecloud_curl.py delete --group-id GROUP_ID
 5. 若失败，附上 `curl -i` 的响应头和错误信息。
 
 同一条签名请求最好分别从客户环境和网关服务器执行。客户环境成功、网关服务器出现 `Empty reply from server` 时，优先让移动云检查网关出口 IP `154.36.180.196` 的接入策略。
-
