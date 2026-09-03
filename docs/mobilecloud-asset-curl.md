@@ -50,7 +50,9 @@ cd new-api
 ```
 
 脚本会依次输出本机主机名、出口 IP、DNS、TLS 握手、上游 HTTP 状态和响应体；
-不会打印签名 URL、SecretKey，也不会默认创建或删除素材组。需要验证创建/删除
+请求采用直连 socket，不读取 `HTTP(S)_PROXY` 环境变量（代理软件的 TUN/VPN
+路由仍会生效），因此输出的出口 IP 与实际探测请求一致；不会打印签名 URL、
+SecretKey，也不会默认创建或删除素材组。需要验证创建/删除
 时再显式执行 `--operation create --cleanup --yes`。
 
 ## 3. 第一步：无签名连通性探针

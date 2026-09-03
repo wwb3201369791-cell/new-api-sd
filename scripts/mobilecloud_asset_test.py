@@ -107,11 +107,34 @@ def resolve_addresses(host: str, port: int) -> list[str]:
 
 def show_egress_ip() -> None:
     try:
-        with urllib.request.urlopen("https://api.ipify.org", timeout=5) as response:
+        # The request below uses a raw socket so that the probe describes the
+        # same direct route as http_request. Do not let HTTP(S)_PROXY alter
+        # this diagnostic value; TUN/VPN routing is still reflected naturally.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open("https://api.ipify.org", timeout=5) as response:
             value = response.read(128).decode("ascii", "replace").strip()
         print(f"EGRESS_IP: {value or 'unknown'}")
     except Exception as exc:  # noqa: BLE001 - diagnostic output must continue
         print(f"EGRESS_IP: unknown ({type(exc).__name__})")
+
+
+def show_proxy_environment() -> None:
+    names = [
+        name
+        for name in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        )
+        if os.getenv(name)
+    ]
+    if names:
+        print("PROXY_ENV: configured (direct socket probe ignores these variables)")
+    else:
+        print("PROXY_ENV: none")
 
 
 def tls_probe(
@@ -324,6 +347,7 @@ def main() -> int:
     print(f"REQUEST_PATH: {path}")
     print(f"SIGNATURE_METHOD: {args.signature_method}")
     print(f"LOCAL_HOSTNAME: {socket.gethostname()}")
+    show_proxy_environment()
     show_egress_ip()
     try:
         addresses = resolve_addresses(host, port)
