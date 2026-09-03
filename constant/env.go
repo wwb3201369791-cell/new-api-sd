@@ -18,6 +18,7 @@ var GenerateDefaultToken bool
 var ErrorLogEnabled bool
 var TaskQueryLimit int
 var TaskTimeoutMinutes int
+var TaskPollMaxFailures = 20
 var TaskPluginProtocolTimeoutSeconds int
 
 // TaskUpstreamTimeoutSeconds bounds one task-provider HTTP request. It is
