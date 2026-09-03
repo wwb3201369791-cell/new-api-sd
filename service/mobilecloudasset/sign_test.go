@@ -32,3 +32,14 @@ func TestSignIsDeterministicAndContainsPublicParameters(t *testing.T) {
 		t.Fatalf("unexpected signed query: %q", first)
 	}
 }
+
+func TestSignUsesBeijingWallClockTimestamp(t *testing.T) {
+	now := time.Date(2026, 9, 3, 2, 54, 0, 0, time.UTC)
+	signed, err := Sign("POST", "/api/v2/keypair", "testid", "testsecret", nil, now, "nonce", "HmacSHA1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(signed, "Timestamp=2026-09-03T10%3A54%3A00Z") {
+		t.Fatalf("signed query did not use Beijing wall-clock timestamp: %q", signed)
+	}
+}

@@ -100,7 +100,17 @@ func NewClient(config Config) (*Client, error) {
 	}
 	client := config.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		// The Mobile Cloud asset gateway currently closes HTTP/2 requests before
+		// returning a response. Keep the default client on HTTP/1.1 while still
+		// preserving the standard transport proxy/TLS settings.
+		transport := http.DefaultTransport
+		if base, ok := http.DefaultTransport.(*http.Transport); ok {
+			clone := base.Clone()
+			clone.ForceAttemptHTTP2 = false
+			clone.TLSNextProto = nil
+			transport = clone
+		}
+		client = &http.Client{Transport: transport, Timeout: 60 * time.Second}
 	}
 	return &Client{config: config, client: client}, nil
 }

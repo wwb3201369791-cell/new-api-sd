@@ -63,7 +63,13 @@ func Sign(method, path, accessKey, secretKey string, params map[string]string, n
 	}
 	params = cloneParams(params)
 	params["AccessKey"] = accessKey
-	params["Timestamp"] = now.UTC().Format("2006-01-02T15:04:05Z")
+	// Mobile Cloud's V2 gateway follows its SDKs and expects the current
+	// Beijing wall-clock time with a literal trailing Z. Sending UTC here is
+	// rejected as an invalid timestamp even when the server clock is healthy.
+	// Keep this conversion explicit so deployments in a UTC container behave
+	// the same as the official SDKs.
+	beijing := time.FixedZone("Asia/Shanghai", 8*60*60)
+	params["Timestamp"] = now.In(beijing).Format("2006-01-02T15:04:05Z")
 	params["SignatureNonce"] = nonce
 	params["SignatureVersion"] = "V2.0"
 	params["SignatureMethod"] = signatureMethod
