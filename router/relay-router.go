@@ -64,6 +64,7 @@ func SetRelayRouter(router *gin.Engine) {
 		assetV1Router.POST("/billing/deductions", controller.QueryMobileCloudAiccCreditDeduction)
 		assetV1Router.POST("/billing/deductions/export", controller.CreateMobileCloudAiccDeductionExportTask)
 		assetV1Router.GET("/billing/deductions/export/:task_id", controller.GetMobileCloudAiccDeductionExportTask)
+		assetV1Router.POST("/billing/orders/cancel", controller.CancelMobileCloudOrder)
 	}
 
 	geminiRouter := router.Group("/v1beta/models")

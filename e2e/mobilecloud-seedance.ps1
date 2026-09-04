@@ -13,7 +13,9 @@ param(
   [string]$Model = "doubao-seedance-2.0",
   [string]$Prompt = "A calm cinematic aerial shot over a coastal city at sunrise",
   [int]$PollSeconds = 5,
-  [int]$MaxPolls = 24
+  # Seedance tasks commonly take a few minutes; keep the default window long
+  # enough to avoid reporting a false timeout while the provider is working.
+  [int]$MaxPolls = 60
 )
 
 $ErrorActionPreference = "Stop"

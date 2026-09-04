@@ -22,6 +22,7 @@ import (
 	mobilecloudasset "github.com/QuantumNous/new-api/service/mobilecloudasset"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 var defaultAssetGroupMu sync.Mutex
@@ -33,6 +34,18 @@ type assetOwnershipError struct {
 
 func (e *assetOwnershipError) Error() string {
 	return fmt.Sprintf("%s not found or does not belong to the current customer", e.resource)
+}
+
+type assetConflictError struct {
+	code    string
+	message string
+}
+
+func (e *assetConflictError) Error() string {
+	if e == nil {
+		return "asset conflict"
+	}
+	return e.message
 }
 
 // Upstream asset APIs are exposed as a provider-neutral management
@@ -92,7 +105,7 @@ func ListMobileCloudAssetGroups(c *gin.Context) {
 	restrictProviderResponse(response, ownedIDs, "groupId")
 	// Keep a local ownership/index copy while returning the provider envelope
 	// unchanged so callers can use the same fields as the official API.
-	persistAssetGroups(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
+	logAssetIndexError(c, "group", channel.Id, persistAssetGroups(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
 	assetAPIResponse(c, response)
 }
 
@@ -122,12 +135,24 @@ func CreateMobileCloudAssetGroup(c *gin.Context) {
 		return
 	}
 	body["groupType"] = "AIGC"
-	if name := strings.TrimSpace(stringValue(body["groupName"])); name == "" || len([]rune(name)) > 64 {
+	groupName := strings.TrimSpace(stringValue(body["groupName"]))
+	if groupName == "" || len([]rune(groupName)) > 64 {
 		assetAPIError(c, errors.New("groupName is required and must be at most 64 characters"))
 		return
 	}
+	body["groupName"] = groupName
 	if description := stringValue(body["description"]); len([]rune(description)) > 300 {
 		assetAPIError(c, errors.New("description must be at most 300 characters"))
+		return
+	}
+	if existing, lookupErr := model.FindMobileCloudAssetGroupByName(c.Request.Context(), c.GetInt("id"), channel.Id, groupName); lookupErr != nil {
+		assetAPIError(c, lookupErr)
+		return
+	} else if existing != nil {
+		assetAPIError(c, &assetConflictError{
+			code:    "ASSET_GROUP_NAME_EXISTS",
+			message: "asset group name already exists for this customer and channel",
+		})
 		return
 	}
 	response, err := client.CreateAssetGroup(c.Request.Context(), body)
@@ -135,7 +160,7 @@ func CreateMobileCloudAssetGroup(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
-	persistAssetGroups(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
+	logAssetIndexError(c, "group", channel.Id, persistAssetGroups(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
 	assetAPIResponse(c, response)
 }
 
@@ -181,7 +206,7 @@ func UpdateMobileCloudAssetGroup(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
-	persistAssetGroups(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
+	logAssetIndexError(c, "group", channel.Id, persistAssetGroups(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
 	assetAPIResponse(c, response)
 }
 
@@ -266,7 +291,7 @@ func ListMobileCloudAssets(c *gin.Context) {
 		return
 	}
 	restrictProviderResponse(response, ownedIDs, "groupId")
-	persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
+	logAssetIndexError(c, "asset", channel.Id, persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
 	assetAPIResponse(c, response)
 }
 
@@ -312,8 +337,8 @@ func CreateMobileCloudAsset(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
-	persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
-	persistCreatedAsset(c.Request.Context(), c.GetInt("id"), channel.Id, body, response)
+	logAssetIndexError(c, "asset", channel.Id, persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
+	logAssetIndexError(c, "asset", channel.Id, persistCreatedAsset(c.Request.Context(), c.GetInt("id"), channel.Id, body, response))
 	assetAPIResponse(c, response)
 }
 
@@ -515,8 +540,8 @@ func UploadMobileCloudAsset(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": providerErr.Error(), "data": result})
 		return
 	}
-	persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
-	persistCreatedAsset(c.Request.Context(), c.GetInt("id"), channel.Id, providerRequest, response)
+	logAssetIndexError(c, "asset", channel.Id, persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
+	logAssetIndexError(c, "asset", channel.Id, persistCreatedAsset(c.Request.Context(), c.GetInt("id"), channel.Id, providerRequest, response))
 	result["asset"] = providerResponseValue(response)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }
@@ -593,7 +618,7 @@ func UpdateMobileCloudAsset(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
-	persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response))
+	logAssetIndexError(c, "asset", channel.Id, persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
 	assetAPIResponse(c, response)
 }
 
@@ -686,6 +711,60 @@ func QueryMobileCloudModelTokensConsumed(c *gin.Context) {
 		return
 	}
 	assetAPIResponse(c, response)
+}
+
+// CancelMobileCloudOrder exposes the upstream按量计费预置模型退订 API.  It
+// deliberately lives beside the operator billing endpoints and is not used by
+// video task cancellation.
+func CancelMobileCloudOrder(c *gin.Context) {
+	client, _, err := mobileCloudAssetClient(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	body, err := readAssetJSON(c)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	instanceIDs, ok := body["instanceIds"]
+	if !ok || !hasStringItems(instanceIDs) {
+		assetAPIError(c, errors.New("instanceIds must be a non-empty array"))
+		return
+	}
+	response, err := client.CancelOrder(c.Request.Context(), body)
+	if err != nil {
+		assetAPIError(c, err)
+		return
+	}
+	assetAPIResponse(c, response)
+}
+
+func hasStringItems(value any) bool {
+	switch items := value.(type) {
+	case []any:
+		if len(items) == 0 {
+			return false
+		}
+		for _, item := range items {
+			if strings.TrimSpace(stringValue(item)) == "" {
+				return false
+			}
+		}
+		return true
+	case []string:
+		if len(items) == 0 {
+			return false
+		}
+		for _, item := range items {
+			if strings.TrimSpace(item) == "" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func QueryMobileCloudAiccCreditDeduction(c *gin.Context) {
@@ -1046,10 +1125,10 @@ func normalizeRunyuanAssetItem(item map[string]any) map[string]any {
 	return normalizeRunyuanAssetBody(map[string]any{"Result": copy})
 }
 
-func persistAssetGroups(ctx context.Context, userID, channelID int, value any) {
+func persistAssetGroups(ctx context.Context, userID, channelID int, value any) error {
 	envelope, ok := value.(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 	items := providerItems(envelope)
 	for _, item := range items {
@@ -1063,6 +1142,9 @@ func persistAssetGroups(ctx context.Context, userID, channelID int, value any) {
 		}
 		var row model.MobileCloudAssetGroup
 		if err := model.DB.WithContext(ctx).Where("user_id = ? AND channel_id = ? AND provider_group_id = ?", userID, channelID, providerID).First(&row).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			row = model.MobileCloudAssetGroup{UserID: userID, ChannelID: channelID, ProviderGroupID: providerID}
 		}
 		row.ChannelID = channelID
@@ -1071,17 +1153,20 @@ func persistAssetGroups(ctx context.Context, userID, channelID int, value any) {
 		row.Description = stringValue(group["description"])
 		row.SetRawData(group)
 		model.TouchMobileCloudAssetGroup(&row)
-		_ = model.DB.WithContext(ctx).Save(&row).Error
+		if err := model.DB.WithContext(ctx).Save(&row).Error; err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func persistAssets(ctx context.Context, userID, channelID int, value any) {
+func persistAssets(ctx context.Context, userID, channelID int, value any) error {
 	envelope, ok := value.(map[string]any)
 	if !ok {
 		if providerID := stringValue(value); providerID != "" {
-			return
+			return nil
 		}
-		return
+		return nil
 	}
 	items := providerItems(envelope)
 	for _, item := range items {
@@ -1095,6 +1180,9 @@ func persistAssets(ctx context.Context, userID, channelID int, value any) {
 		}
 		var row model.MobileCloudAsset
 		if err := model.DB.WithContext(ctx).Where("user_id = ? AND channel_id = ? AND provider_asset_id = ?", userID, channelID, providerID).First(&row).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 			row = model.MobileCloudAsset{UserID: userID, ChannelID: channelID, ProviderAssetID: providerID}
 		}
 		row.ChannelID = channelID
@@ -1106,14 +1194,24 @@ func persistAssets(ctx context.Context, userID, channelID int, value any) {
 		row.ErrorMessage = stringValue(asset["errorMessage"])
 		row.SetRawData(asset)
 		model.TouchMobileCloudAsset(&row)
-		_ = model.DB.WithContext(ctx).Save(&row).Error
+		if err := model.DB.WithContext(ctx).Save(&row).Error; err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func persistCreatedAsset(ctx context.Context, userID, channelID int, request map[string]any, response *mobilecloudasset.Response) {
-	providerID := providerAssetID(providerBody(response))
+func persistCreatedAsset(ctx context.Context, userID, channelID int, request map[string]any, response *mobilecloudasset.Response) error {
+	providerValue := providerBody(response)
+	providerID := providerAssetID(providerValue)
 	if providerID == "" {
-		return
+		return nil
+	}
+	status := "PROCESSING"
+	if providerMap, ok := providerValue.(map[string]any); ok {
+		if providerStatus := stringValue(providerMap["status"]); providerStatus != "" {
+			status = providerStatus
+		}
 	}
 	value := map[string]any{
 		"assetId":   providerID,
@@ -1121,9 +1219,16 @@ func persistCreatedAsset(ctx context.Context, userID, channelID int, request map
 		"assetName": request["assetName"],
 		"assetUrl":  request["assetUrl"],
 		"assetType": request["assetType"],
-		"status":    "PROCESSING",
+		"status":    status,
 	}
-	persistAssets(ctx, userID, channelID, value)
+	return persistAssets(ctx, userID, channelID, value)
+}
+
+func logAssetIndexError(c *gin.Context, resource string, channelID int, err error) {
+	if err == nil {
+		return
+	}
+	logger.LogWarn(c.Request.Context(), "asset %s index persistence failed user_id=%d channel_id=%d error=%v", resource, c.GetInt("id"), channelID, err)
 }
 
 func requireOwnedAssetGroup(c *gin.Context, channelID int, providerID string) (*model.MobileCloudAssetGroup, error) {
@@ -1181,7 +1286,9 @@ func ensureMobileCloudDefaultGroup(ctx context.Context, userID, channelID int, c
 	if providerID == "" {
 		return "", errors.New("asset provider did not return a groupId")
 	}
-	persistAssetGroups(ctx, userID, channelID, providerBody(response))
+	if err := persistAssetGroups(ctx, userID, channelID, providerBody(response)); err != nil {
+		return "", err
+	}
 	if err := model.MarkMobileCloudAssetGroupDefault(ctx, userID, channelID, providerID); err != nil {
 		return "", err
 	}
@@ -1313,31 +1420,38 @@ func assetAPIError(c *gin.Context, err error) {
 	if errors.As(err, &ownershipErr) {
 		status = http.StatusNotFound
 	} else {
-		var transportErr *mobilecloudasset.TransportError
-		if errors.As(err, &transportErr) && transportErr != nil {
-			if transportErr.IsTimeout() {
-				status = http.StatusGatewayTimeout
-				code = "ASSET_PROVIDER_TIMEOUT"
-				message = "asset provider request timed out; check the upstream endpoint and network path"
-			} else {
-				status = http.StatusBadGateway
-				code = "ASSET_PROVIDER_UNREACHABLE"
-				message = "asset provider connection failed; check server egress, DNS/TLS, or provider allowlist"
-			}
-			logger.LogWarn(c.Request.Context(), "asset provider transport error provider=%s method=%s path=%s timeout=%t cause=%s", transportErr.Provider, transportErr.Method, transportErr.Path, transportErr.IsTimeout(), transportErr.CauseType())
+		var conflictErr *assetConflictError
+		if errors.As(err, &conflictErr) && conflictErr != nil {
+			status = http.StatusConflict
+			code = conflictErr.code
+			message = conflictErr.Error()
 		} else {
-			var providerErr *mobilecloudasset.ProviderError
-			if errors.As(err, &providerErr) && providerErr != nil {
-				message = providerErr.Error()
-				status = providerErr.StatusCode
-				code = "ASSET_PROVIDER_ERROR"
-				if status < 400 || status > 599 {
+			var transportErr *mobilecloudasset.TransportError
+			if errors.As(err, &transportErr) && transportErr != nil {
+				if transportErr.IsTimeout() {
+					status = http.StatusGatewayTimeout
+					code = "ASSET_PROVIDER_TIMEOUT"
+					message = "asset provider request timed out; check the upstream endpoint and network path"
+				} else {
 					status = http.StatusBadGateway
-				} else if status >= 500 {
-					status = http.StatusBadGateway
+					code = "ASSET_PROVIDER_UNREACHABLE"
+					message = "asset provider connection failed; check server egress, DNS/TLS, or provider allowlist"
 				}
-			} else if err != nil && strings.TrimSpace(err.Error()) != "" {
-				message = err.Error()
+				logger.LogWarn(c.Request.Context(), "asset provider transport error provider=%s method=%s path=%s timeout=%t cause=%s", transportErr.Provider, transportErr.Method, transportErr.Path, transportErr.IsTimeout(), transportErr.CauseType())
+			} else {
+				var providerErr *mobilecloudasset.ProviderError
+				if errors.As(err, &providerErr) && providerErr != nil {
+					message = providerErr.Error()
+					status = providerErr.StatusCode
+					code = "ASSET_PROVIDER_ERROR"
+					if status < 400 || status > 599 {
+						status = http.StatusBadGateway
+					} else if status >= 500 {
+						status = http.StatusBadGateway
+					}
+				} else if err != nil && strings.TrimSpace(err.Error()) != "" {
+					message = err.Error()
+				}
 			}
 		}
 	}

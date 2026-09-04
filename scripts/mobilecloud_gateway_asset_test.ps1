@@ -23,6 +23,8 @@ param(
   [int]$AssetPollSeconds = 3,
   [int]$AssetPollAttempts = 10,
   [switch]$SkipAsset,
+  [switch]$TestDefaultGroup,
+  [switch]$TestDuplicateGroupName,
   [switch]$Cleanup,
   [switch]$KeepFixtures
 )
@@ -211,6 +213,22 @@ try {
   if ($returnedName -and $returnedName -ne $updatedName) { throw "素材组更新名称不匹配: $returnedName" }
   Write-Step "更新自定义素材组" "PASS" $updatedName
 
+  if ($TestDuplicateGroupName) {
+    try {
+      Invoke-GatewayJson -Method POST -Path $groupsPath -Body @{
+        groupName = $updatedName
+        description = "duplicate-name regression check"
+      } | Out-Null
+      throw "重复素材组名称请求意外成功"
+    } catch {
+      $duplicateError = $_.Exception.Message
+      if ($duplicateError -notmatch "409" -or $duplicateError -notmatch "ASSET_GROUP_NAME_EXISTS") {
+        throw "重复素材组名称校验失败: $duplicateError"
+      }
+      Write-Step "拒绝重复素材组名称" "PASS" "HTTP 409 / ASSET_GROUP_NAME_EXISTS"
+    }
+  }
+
   if ($SkipAsset) {
     Write-Step "创建/查询素材" "SKIP" "已通过 -SkipAsset 跳过"
   } elseif ([string]::IsNullOrWhiteSpace($AssetUrl)) {
@@ -265,6 +283,29 @@ try {
       Write-Step "更新素材名称" "PASS" $updatedAssetName
     } else {
       Write-Step "更新素材名称" "SKIP" "当前状态为 $assetStatus，移动云仅允许 ACTIVE 素材更新"
+    }
+
+    if ($TestDefaultGroup) {
+      $defaultAssetName = "new-api-default-e2e-$runId"
+      $defaultAssetResponse = Invoke-GatewayJson -Method POST -Path (Add-ChannelQuery "/v1/assets") -Body @{
+        assetName = $defaultAssetName
+        assetType = "Image"
+        assetUrl = $AssetUrl
+      }
+      $defaultAssetBody = Get-ProviderBody $defaultAssetResponse
+      $defaultAssetId = Get-ProviderId -Value $defaultAssetBody -Keys @("assetId", "assetID", "AssetId", "Id")
+      if (-not $defaultAssetId) { throw "省略 groupId 创建素材成功响应中没有 assetId" }
+      $createdAssetIds.Add($defaultAssetId)
+      # Mobile Cloud's createAsset response body is only the new asset ID;
+      # fetch the detail response to verify the server-side default-group
+      # assignment instead of assuming groupId is present in the create body.
+      $defaultAssetDetail = Invoke-GatewayJson -Method GET -Path (Add-ChannelQuery "/v1/assets/$([uri]::EscapeDataString($defaultAssetId))")
+      $defaultAssetDetailBody = Get-ProviderBody $defaultAssetDetail
+      $defaultReturnedGroupId = Get-ProviderId -Value $defaultAssetDetailBody -Keys @("groupId", "groupID", "GroupId")
+      if ($defaultReturnedGroupId -ne $defaultGroupId) {
+        throw "省略 groupId 未回退到默认素材组: $defaultReturnedGroupId"
+      }
+      Write-Step "省略 groupId 自动使用默认组" "PASS" "$defaultAssetId -> $defaultGroupId"
     }
   }
 

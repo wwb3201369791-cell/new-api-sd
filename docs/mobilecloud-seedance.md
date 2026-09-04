@@ -85,8 +85,12 @@ ID，因而可以用“网关请求 ID → 上游请求 ID → 任务 ID”定�
 - `POST /api/mobilecloud/billing/deductions`
 - `POST /api/mobilecloud/billing/deductions/export`
 - `GET /api/mobilecloud/billing/deductions/export/:task_id`
+- `POST /api/mobilecloud/billing/orders/cancel`
 
 以上素材组/素材接口同时提供 `/v1/asset-groups` 和 `/v1/assets` 厂商无关别名。
+计费查询和退订接口也提供 `/v1/billing/...` 别名；退订请求体至少要包含非空的
+`instanceIds` 数组。该接口只对移动云渠道转发，润元渠道会明确返回功能不可用，避免
+误把移动云路径发送到润元。
 每个客户的默认 AIGC 素材组按需自动创建；创建素材时省略 `groupId` 会自动
 使用该默认组。显式传入的组 ID 必须属于当前客户和当前渠道，其他客户的资源
 会返回 404。
@@ -113,7 +117,8 @@ HTTP/1.1，避免移动云素材网关在 HTTP/2 下提前关闭连接。
 上游超时→409 `upstream_timeout`、401/403→凭证错误、429→429 `rate_limited`。
 任务创建的单次上游请求默认 120 秒，可通过
 `TASK_UPSTREAM_TIMEOUT_SECONDS` 调整。创建阶段按现有 `RETRY_TIMES` 对 429/5xx
-重试；轮询读取对传输错误、408、429、5xx 做最多 3 次短退避重试。
+重试；素材查询、详情及幂等更新/删除遇到连接提前关闭时，会重新签名并做最多
+3 次短退避重试，创建请求不会自动重放以避免重复资源。
 
 客户端可在 `POST /v1/videos` 或 Ark 创建接口带 `Idempotency-Key`（最长 255
 字符）。相同用户、路径和 key 在 24 小时内只会产生一个任务；并发重复请求返回
@@ -135,9 +140,10 @@ provider 插件，复用列表/取消/删除/素材控制器，只实现其鉴�
 移动云素材库的上游直连查询、创建、精确查询和清理命令，见
 [移动云素材库 curl 测试指南](mobilecloud-asset-curl.md)。
 
-可直接运行 `pwsh -File e2e/mobilecloud-seedance.ps1 -BaseUrl
-https://HOST -Token TOKEN` 做真实网关验收。脚本不会接触或输出移动云密钥；
-移动云 Bearer key 必须先在后台的 `mobilecloud` 渠道中配置。
+真实视频任务验收应沿用火山 Seedance 的客户端请求，目标地址改为网关的
+`https://HOST`，并使用 New API 客户 Token；移动云 Bearer key 只在后台的
+`mobilecloud` 渠道中配置，客户端请求和测试脚本都不会接触或输出该密钥。
+素材与渠道连通性可直接运行下方的 `run_mobilecloud_gateway_asset_test.bat`。
 
 ## 网关素材 API 一键烟测
 
@@ -168,6 +174,23 @@ pwsh -File .\mobilecloud_gateway_asset_test.ps1 `
   -AssetUrl "https://PUBLIC_URL/demo.png" `
   -Cleanup
 ```
+
+需要同时验证“省略 `groupId` 自动使用默认组”和重复名称保护时，追加两个开关：
+
+```powershell
+pwsh -File .\mobilecloud_gateway_asset_test.ps1 `
+  -BaseUrl "https://HOST" `
+  -Token TOKEN `
+  -AssetUrl "https://PUBLIC_URL/demo.png" `
+  -TestDefaultGroup `
+  -TestDuplicateGroupName `
+  -Cleanup
+```
+
+`-TestDefaultGroup` 会创建一个不带 `groupId` 的素材，再读取素材详情确认其组 ID 等于当前
+客户默认组（移动云创建响应的 `body` 仅返回素材 ID）；`-TestDuplicateGroupName` 会重复提交同一客户/渠道下的组名并要求网关
+返回 `409 ASSET_GROUP_NAME_EXISTS`。这两项测试会产生临时上游资源，建议与
+`-Cleanup` 一起运行。
 
 脚本同时在系统临时目录生成三张极小 PNG 作为本地夹具，测试结束自动清理。
 移动云会从 `assetUrl` 下载素材，因此本地文件、`localhost`、`127.0.0.1` 或

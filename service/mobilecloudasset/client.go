@@ -23,6 +23,8 @@ const (
 	DefaultRunyuanBaseURL = "https://runy.yitd.cn"
 	DefaultResourcePool   = "CIDC-CORE-00"
 	DefaultRunyuanVersion = "2024-01-01"
+	maxTransportRetries   = 2
+	transportRetryDelay   = 150 * time.Millisecond
 )
 
 var (
@@ -155,6 +157,15 @@ func NewClient(config Config) (*Client, error) {
 			clone := base.Clone()
 			clone.ForceAttemptHTTP2 = false
 			clone.TLSNextProto = nil
+			clone.DisableKeepAlives = true
+			// The public Mobile Cloud hostname advertises both IPv4 and IPv6,
+			// while some server-side ingress paths only accept IPv4. Prefer the
+			// stable IPv4 path for this protocol; callers can still inject a
+			// custom HTTP client for IPv6-only deployments.
+			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+			clone.DialContext = func(ctx context.Context, _ string, address string) (net.Conn, error) {
+				return dialer.DialContext(ctx, "tcp4", address)
+			}
 			transport = clone
 		}
 		client = &http.Client{Transport: transport, Timeout: 60 * time.Second}
@@ -181,6 +192,40 @@ func (c *Client) Do(ctx context.Context, method, path string, payload any, param
 			return nil, fmt.Errorf("marshal mobile cloud asset payload: %w", err)
 		}
 	}
+	attempts := 1
+	if c.config.Provider == "mobilecloud" && shouldRetryTransport(method, path) {
+		attempts += maxTransportRetries
+	}
+	var lastErr error
+	transportRetryOccurred := false
+	for attempt := 0; attempt < attempts; attempt++ {
+		result, err := c.doOnce(ctx, method, path, body, params)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		// A DELETE may have been applied upstream even when its response socket
+		// was closed. If the retry reports the resource as already absent, make
+		// the operation idempotently successful rather than surfacing a false
+		// gateway error to the caller.
+		if method == http.MethodDelete && transportRetryOccurred && isDeleteAlreadyAbsent(err) {
+			return successfulDeleteResponse(result), nil
+		}
+		var transportErr *TransportError
+		if !errors.As(err, &transportErr) || attempt+1 >= attempts {
+			return result, err
+		}
+		transportRetryOccurred = true
+		if err := waitTransportRetry(ctx, attempt); err != nil {
+			return nil, &TransportError{Provider: c.config.Provider, Method: method, Path: path, Err: err}
+		}
+	}
+	return nil, lastErr
+}
+
+// doOnce signs every attempt independently. Mobile Cloud signatures contain
+// a nonce and timestamp, so reusing a failed request can itself be rejected.
+func (c *Client) doOnce(ctx context.Context, method, path string, body []byte, params map[string]string) (*Response, error) {
 	signedQuery, err := Sign(method, path, c.config.AccessKey, c.config.SecretKey, params, time.Now().UTC(), "", c.config.SignatureMethod)
 	if err != nil {
 		return nil, err
@@ -191,6 +236,13 @@ func (c *Client) Do(ctx context.Context, method, path string, payload any, param
 		return nil, err
 	}
 	request.Header.Set("Accept", "application/json")
+	// The Mobile Cloud gateway intermittently closes sockets before sending a
+	// response. Explicitly close each request; Do retries only read/idempotent
+	// operations, while create requests are never replayed automatically.
+	if c.config.Provider == "mobilecloud" {
+		request.Close = true
+		request.Header.Set("Connection", "close")
+	}
 	if len(body) > 0 {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -211,6 +263,59 @@ func (c *Client) Do(ctx context.Context, method, path string, payload any, param
 		return result, err
 	}
 	return result, nil
+}
+
+func shouldRetryTransport(method, path string) bool {
+	if method == http.MethodGet || method == http.MethodHead || method == http.MethodPut || method == http.MethodDelete {
+		return true
+	}
+	if method != http.MethodPost {
+		return false
+	}
+	// These POST endpoints are read-only lookups. Mutating create/update,
+	// authentication-session, export, and cancellation requests are excluded.
+	switch path {
+	case "/api/openapi-maas/exp/aicc/v2/asset-group/query",
+		"/api/openapi-maas/exp/aicc/v2/asset/query",
+		"/api/openapi-maas/exp/aicc/v2/real-person-auth/asset-group/by-byted-token",
+		"/api/openapi-maas/model/tokens/consumed",
+		"/api/openapi-maas/model/aicc/deduction":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDeleteAlreadyAbsent(err error) bool {
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr == nil {
+		return false
+	}
+	message := strings.ToLower(providerErr.Message)
+	// Only normalize an explicit not-found response. A permission failure can
+	// use the same provider code and must remain visible to the caller.
+	return providerErr.Code == "C400999" && (strings.Contains(message, "not found") || strings.Contains(message, "不存在"))
+}
+
+func successfulDeleteResponse(response *Response) *Response {
+	if response == nil {
+		return &Response{StatusCode: http.StatusOK, Provider: "mobilecloud", Body: []byte(`{"state":"OK","errorCode":null,"errorMessage":null,"body":true}`)}
+	}
+	response.StatusCode = http.StatusOK
+	response.Body = []byte(`{"state":"OK","errorCode":null,"errorMessage":null,"body":true}`)
+	return response
+}
+
+func waitTransportRetry(ctx context.Context, attempt int) error {
+	delay := transportRetryDelay * time.Duration(attempt+1)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // doRunyuan sends one of Runyuan's /v1/video Action requests. Unlike the
@@ -528,4 +633,14 @@ func (c *Client) GetAiccDeductionExportTask(ctx context.Context, taskID string) 
 		return nil, errors.New("runyuan does not expose the Mobile Cloud deduction-export API")
 	}
 	return c.Do(ctx, http.MethodGet, "/api/openapi-maas/model/aicc/deduction/export-task/"+url.PathEscape(taskID), nil, nil)
+}
+
+// CancelOrder unsubscribes a Mobile Cloud按量计费预置模型 instance.  This is
+// separate from deleting/cancelling an individual video task, which remains a
+// task-plugin concern.
+func (c *Client) CancelOrder(ctx context.Context, body map[string]any) (*Response, error) {
+	if c.config.Provider == "runyuan" {
+		return nil, errors.New("runyuan does not expose the Mobile Cloud order-cancel API")
+	}
+	return c.Do(ctx, http.MethodPost, "/api/openapi-maas/console/studio/cancel", body, nil)
 }

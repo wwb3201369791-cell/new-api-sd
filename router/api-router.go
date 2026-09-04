@@ -279,6 +279,7 @@ func SetApiRouter(router *gin.Engine) {
 			mobileCloudAssetRoute.POST("/billing/deductions", controller.QueryMobileCloudAiccCreditDeduction)
 			mobileCloudAssetRoute.POST("/billing/deductions/export", controller.CreateMobileCloudAiccDeductionExportTask)
 			mobileCloudAssetRoute.GET("/billing/deductions/export/:task_id", controller.GetMobileCloudAiccDeductionExportTask)
+			mobileCloudAssetRoute.POST("/billing/orders/cancel", controller.CancelMobileCloudOrder)
 		}
 		apiRouter.GET("/task_plugin_options", middleware.AdminAuth(), middleware.RequirePermission(authz.TaskPluginBind), controller.GetTaskPluginOptions)
 		registerChannelRoutes(apiRouter)

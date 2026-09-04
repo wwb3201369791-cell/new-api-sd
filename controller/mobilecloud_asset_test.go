@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	mobilecloudasset "github.com/QuantumNous/new-api/service/mobilecloudasset"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -119,4 +120,75 @@ func TestEnsureMobileCloudDefaultGroupIsCreatedOnce(t *testing.T) {
 	require.NoError(t, model.DB.Find(&groups).Error)
 	require.Len(t, groups, 1)
 	require.True(t, groups[0].IsDefault)
+}
+
+func TestFindMobileCloudAssetGroupByNameIsScopedAndNormalized(t *testing.T) {
+	originalDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, database.AutoMigrate(&model.MobileCloudAssetGroup{}))
+	model.DB = database
+	t.Cleanup(func() { model.DB = originalDB })
+
+	require.NoError(t, model.DB.Create(&model.MobileCloudAssetGroup{
+		UserID: 7, ChannelID: 11, ProviderGroupID: "group-owned", Name: "Customer Assets",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.MobileCloudAssetGroup{
+		UserID: 8, ChannelID: 11, ProviderGroupID: "group-other-user", Name: "Customer Assets",
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.MobileCloudAssetGroup{
+		UserID: 7, ChannelID: 12, ProviderGroupID: "group-other-channel", Name: "Customer Assets",
+	}).Error)
+
+	owned, err := model.FindMobileCloudAssetGroupByName(context.Background(), 7, 11, "  customer assets ")
+	require.NoError(t, err)
+	require.NotNil(t, owned)
+	require.Equal(t, "group-owned", owned.ProviderGroupID)
+
+	notOwned, err := model.FindMobileCloudAssetGroupByName(context.Background(), 7, 11, "other name")
+	require.NoError(t, err)
+	require.Nil(t, notOwned)
+}
+
+func TestAssetAPIErrorMapsDuplicateGroupNameToConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/asset-groups", nil)
+
+	assetAPIError(context, &assetConflictError{
+		code:    "ASSET_GROUP_NAME_EXISTS",
+		message: "asset group name already exists for this customer and channel",
+	})
+
+	require.Equal(t, http.StatusConflict, response.Code)
+	require.Contains(t, response.Body.String(), `"code":"ASSET_GROUP_NAME_EXISTS"`)
+	require.Contains(t, response.Body.String(), "already exists")
+}
+
+func TestPersistCreatedAssetKeepsTerminalProviderStatus(t *testing.T) {
+	originalDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, database.AutoMigrate(&model.MobileCloudAsset{}))
+	model.DB = database
+	t.Cleanup(func() { model.DB = originalDB })
+
+	response := &mobilecloudasset.Response{Body: []byte(`{"body":{"assetId":"asset-terminal","groupId":"group-1","status":"ACTIVE"}}`)}
+	require.NoError(t, persistCreatedAsset(context.Background(), 7, 11, map[string]any{
+		"assetName": "demo",
+		"assetUrl":  "https://example.com/demo.png",
+		"assetType": "Image",
+		"groupId":   "group-1",
+	}, response))
+
+	var asset model.MobileCloudAsset
+	require.NoError(t, model.DB.Where("provider_asset_id = ?", "asset-terminal").First(&asset).Error)
+	require.Equal(t, "ACTIVE", asset.Status)
 }

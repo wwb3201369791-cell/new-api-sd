@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -127,6 +128,29 @@ func FindMobileCloudAssetGroupByProviderID(ctx context.Context, userID, channelI
 		return nil, nil
 	}
 	return &item, err
+}
+
+// FindMobileCloudAssetGroupByName resolves a group name within one customer
+// and channel.  Names are compared case-insensitively after trimming so the
+// uniqueness rule is consistent across SQLite, MySQL, and PostgreSQL
+// collations.
+func FindMobileCloudAssetGroupByName(ctx context.Context, userID, channelID int, name string) (*MobileCloudAssetGroup, error) {
+	normalized := strings.TrimSpace(name)
+	if normalized == "" {
+		return nil, nil
+	}
+	var groups []MobileCloudAssetGroup
+	if err := DB.WithContext(ctx).
+		Where("user_id = ? AND channel_id = ?", userID, channelID).
+		Find(&groups).Error; err != nil {
+		return nil, err
+	}
+	for index := range groups {
+		if strings.EqualFold(strings.TrimSpace(groups[index].Name), normalized) {
+			return &groups[index], nil
+		}
+	}
+	return nil, nil
 }
 
 func FindMobileCloudAssetByProviderID(ctx context.Context, userID, channelID int, providerID string) (*MobileCloudAsset, error) {
