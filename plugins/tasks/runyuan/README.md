@@ -15,3 +15,10 @@ contract to that protocol when a `runyuan` channel is selected. The asset UI is
 currently hidden while the video path is validated end-to-end; operators can
 still use the backend endpoints with `asset_enabled=true` and the asset AK/SK
 fields in the channel settings.
+
+Read-only asset actions are retried with a freshly generated signature when the
+upstream closes the connection before returning an HTTP response. Mutating
+actions are deliberately not replayed. If Runyuan returns one account-level
+AIGC group for multiple customers sharing an AK/SK pair, New API applies a
+second local asset-ID ownership filter so customer data is not exposed across
+tenant boundaries.

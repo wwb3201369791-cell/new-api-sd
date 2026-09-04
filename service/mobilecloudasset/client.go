@@ -389,9 +389,40 @@ func (c *Client) doRunyuan(ctx context.Context, action string, payload any) (*Re
 
 func (c *Client) action(ctx context.Context, action string, body map[string]any) (*Response, error) {
 	if c.config.Provider == "runyuan" {
-		return c.doRunyuan(ctx, action, runyuanPayload(action, body))
+		attempts := 1
+		if isRunyuanReadOnlyAction(action) {
+			attempts += maxTransportRetries
+		}
+		var lastErr error
+		for attempt := 0; attempt < attempts; attempt++ {
+			// Runyuan signatures contain X-Date and a body digest. Sign every
+			// attempt independently so a retry is never sent with stale
+			// authentication metadata.
+			result, err := c.doRunyuan(ctx, action, runyuanPayload(action, body))
+			if err == nil {
+				return result, nil
+			}
+			lastErr = err
+			var transportErr *TransportError
+			if !errors.As(err, &transportErr) || attempt+1 >= attempts {
+				return result, err
+			}
+			if err := waitTransportRetry(ctx, attempt); err != nil {
+				return nil, &TransportError{Provider: c.config.Provider, Method: http.MethodPost, Path: "/v1/video", Err: err}
+			}
+		}
+		return nil, lastErr
 	}
 	return nil, errors.New("asset action is not available")
+}
+
+func isRunyuanReadOnlyAction(action string) bool {
+	switch action {
+	case "GetAssetGroup", "ListAssetGroups", "GetAsset", "ListAssets", "GetVisualValidateResult":
+		return true
+	default:
+		return false
+	}
 }
 
 func decodeProviderError(response *Response) error {

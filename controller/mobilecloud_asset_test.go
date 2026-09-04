@@ -87,6 +87,22 @@ func TestRestrictProviderResponseFiltersRunyuanPascalCaseGroups(t *testing.T) {
 	require.Contains(t, string(response.Body), `"TotalCount":1`)
 }
 
+func TestRestrictRunyuanAssetsToLocallyOwnedIDs(t *testing.T) {
+	response := &mobilecloudasset.Response{Provider: "runyuan", Body: []byte(`{"ResponseMetadata":{"Action":"ListAssets"},"Result":{"Items":[{"Id":"asset-owned","GroupId":"shared"},{"Id":"asset-foreign","GroupId":"shared"}],"TotalCount":2}}`)}
+	restrictProviderAssetResponse(response, map[string]struct{}{"asset-owned": {}})
+	require.Contains(t, string(response.Body), `"asset-owned"`)
+	require.NotContains(t, string(response.Body), `"asset-foreign"`)
+	require.Contains(t, string(response.Body), `"TotalCount":1`)
+}
+
+func TestRestrictRunyuanAssetsWithEmptyIndexReturnsEmptyList(t *testing.T) {
+	response := &mobilecloudasset.Response{Provider: "runyuan", Body: []byte(`{"ResponseMetadata":{"Action":"ListAssets"},"Result":{"Items":[{"Id":"asset-foreign","GroupId":"shared"}],"TotalCount":1}}`)}
+	restrictProviderAssetResponse(response, map[string]struct{}{})
+	require.NotContains(t, string(response.Body), `"asset-foreign"`)
+	require.Contains(t, string(response.Body), `"Items":[]`)
+	require.Contains(t, string(response.Body), `"TotalCount":0`)
+}
+
 func TestEnsureMobileCloudDefaultGroupIsCreatedOnce(t *testing.T) {
 	originalDB := model.DB
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -151,6 +167,27 @@ func TestFindMobileCloudAssetGroupByNameIsScopedAndNormalized(t *testing.T) {
 	notOwned, err := model.FindMobileCloudAssetGroupByName(context.Background(), 7, 11, "other name")
 	require.NoError(t, err)
 	require.Nil(t, notOwned)
+}
+
+func TestRunyuanGroupSharedDetectsCrossCustomerProviderIdentity(t *testing.T) {
+	originalDB := model.DB
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, database.AutoMigrate(&model.MobileCloudAssetGroup{}))
+	model.DB = database
+	t.Cleanup(func() { model.DB = originalDB })
+
+	require.NoError(t, model.DB.Create(&model.MobileCloudAssetGroup{UserID: 7, ChannelID: 11, ProviderGroupID: "shared"}).Error)
+	shared, err := runyuanGroupShared(context.Background(), 11, "shared")
+	require.NoError(t, err)
+	require.False(t, shared)
+	require.NoError(t, model.DB.Create(&model.MobileCloudAssetGroup{UserID: 8, ChannelID: 11, ProviderGroupID: "shared"}).Error)
+	shared, err = runyuanGroupShared(context.Background(), 11, "shared")
+	require.NoError(t, err)
+	require.True(t, shared)
 }
 
 func TestAssetAPIErrorMapsDuplicateGroupNameToConflict(t *testing.T) {

@@ -196,4 +196,29 @@ describe('New API channel', () => {
       ).toBe(true)
     }
   })
+
+  test('accepts Runyuan asset credentials through the same channel settings', () => {
+    const baseForm = {
+      ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: CHANNEL_TYPE_TASK_PLUGIN,
+      task_plugin_key: 'runyuan',
+      name: 'Runyuan',
+      base_url: 'https://runy.example.com',
+      key: 'generation-key',
+      models: 'doubao-seedance-2.0',
+      asset_enabled: true,
+      asset_access_key: 'asset-ak',
+      asset_secret_key: 'asset-sk',
+      asset_base_url: 'https://runy.example.com',
+    }
+
+    expect(channelFormSchema.safeParse(baseForm).success).toBe(true)
+    const setting = JSON.parse(buildSettingJSON(baseForm))
+    expect(setting.task_plugin_key).toBe('runyuan')
+    expect(setting.asset_enabled).toBe(true)
+    expect(setting.asset_access_key).toBe('asset-ak')
+    expect(setting.asset_secret_key).toBe('asset-sk')
+    expect(setting.asset_base_url).toBe('https://runy.example.com')
+    expect(setting).not.toHaveProperty('asset_resource_pool')
+  })
 })

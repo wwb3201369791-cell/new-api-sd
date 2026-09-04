@@ -334,7 +334,9 @@ export const channelFormSchema = z
 
     if (
       data.type === CHANNEL_TYPE_TASK_PLUGIN &&
-      data.task_plugin_key?.trim().toLowerCase() === 'mobilecloud' &&
+      ['mobilecloud', 'runyuan'].includes(
+        data.task_plugin_key?.trim().toLowerCase() || ''
+      ) &&
       data.asset_enabled === true
     ) {
       let existingAssetSettings: Record<string, unknown> = {}
@@ -356,14 +358,14 @@ export const channelFormSchema = z
         addRequiredIssue(
           ctx,
           'asset_access_key',
-          'Asset Access Key is required when the Mobile Cloud asset library is enabled'
+          'Asset Access Key is required when the asset library is enabled'
         )
       }
       if (!hasSecretKey) {
         addRequiredIssue(
           ctx,
           'asset_secret_key',
-          'Asset Secret Key is required when the Mobile Cloud asset library is enabled'
+          'Asset Secret Key is required when the asset library is enabled'
         )
       }
     }
@@ -736,7 +738,9 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
 
   if (
     formData.type === CHANNEL_TYPE_TASK_PLUGIN &&
-    formData.task_plugin_key?.trim().toLowerCase() === 'mobilecloud'
+    ['mobilecloud', 'runyuan'].includes(
+      formData.task_plugin_key?.trim().toLowerCase() || ''
+    )
   ) {
     settingObj.asset_enabled = formData.asset_enabled === true
 

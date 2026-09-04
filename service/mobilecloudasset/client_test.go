@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -274,6 +276,147 @@ func TestRunyuanProviderErrorFromResponseMetadata(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "bad asset") || !strings.Contains(err.Error(), "InvalidParameter") {
 		t.Fatalf("expected Runyuan provider error, got %v", err)
 	}
+}
+
+func TestRunyuanReadOnlyActionRetriesTransport(t *testing.T) {
+	var calls int
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		assert.Equal(t, http.MethodPost, request.Method)
+		assert.Equal(t, "/v1/video", request.URL.Path)
+		assert.Equal(t, "GetAsset", request.URL.Query().Get("Action"))
+		if calls == 1 {
+			return nil, errors.New("temporary upstream disconnect")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"ResponseMetadata":{"RequestId":"req-2"},"Result":{"Id":"asset-1"}}`)),
+			Request:    request,
+		}, nil
+	})
+	client, err := NewClient(Config{
+		Provider:   "runyuan",
+		BaseURL:    "https://runyuan.example.test",
+		AccessKey:  "AK",
+		SecretKey:  "SK",
+		HTTPClient: &http.Client{Transport: transport},
+	})
+	require.NoError(t, err)
+	response, err := client.GetAsset(context.Background(), "asset-1")
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.Equal(t, http.StatusOK, response.StatusCode)
+	assert.Equal(t, 2, calls)
+}
+
+func TestRunyuanMutatingActionDoesNotRetryTransport(t *testing.T) {
+	var calls int
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("temporary upstream disconnect")
+	})
+	client, err := NewClient(Config{
+		Provider:   "runyuan",
+		BaseURL:    "https://runyuan.example.test",
+		AccessKey:  "AK",
+		SecretKey:  "SK",
+		HTTPClient: &http.Client{Transport: transport},
+	})
+	require.NoError(t, err)
+	_, err = client.CreateAsset(context.Background(), map[string]any{"assetName": "hero"})
+	require.Error(t, err)
+	var transportErr *TransportError
+	require.ErrorAs(t, err, &transportErr)
+	assert.Equal(t, 1, calls)
+}
+
+func TestRunyuanAssetActionsUseDocumentedActionNames(t *testing.T) {
+	expectedActions := []string{
+		"CreateAssetGroup", "ListAssetGroups", "GetAssetGroup", "UpdateAssetGroup", "DeleteAssetGroup",
+		"CreateAsset", "ListAssets", "GetAsset", "UpdateAsset", "DeleteAsset",
+		"CreateVisualValidateSession", "GetVisualValidateResult",
+	}
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/v1/video", r.URL.Path)
+		assert.Equal(t, DefaultRunyuanVersion, r.URL.Query().Get("Version"))
+		if calls < len(expectedActions) {
+			assert.Equal(t, expectedActions[calls], r.URL.Query().Get("Action"))
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ResponseMetadata":{"RequestId":"req-1"},"Result":{}}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{Provider: "runyuan", BaseURL: server.URL, AccessKey: "AK", SecretKey: "SK"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	operations := []struct {
+		name string
+		call func() error
+	}{
+		{name: "create group", call: func() error {
+			_, err := client.CreateAssetGroup(ctx, map[string]any{"groupName": "demo"})
+			return err
+		}},
+		{name: "list groups", call: func() error {
+			_, err := client.ListAssetGroups(ctx, map[string]any{"pageNo": 1})
+			return err
+		}},
+		{name: "get group", call: func() error {
+			_, err := client.GetAssetGroup(ctx, "group-1")
+			return err
+		}},
+		{name: "update group", call: func() error {
+			_, err := client.UpdateAssetGroup(ctx, "group-1", map[string]any{"groupName": "updated"})
+			return err
+		}},
+		{name: "delete group", call: func() error {
+			_, err := client.DeleteAssetGroup(ctx, "group-1")
+			return err
+		}},
+		{name: "create asset", call: func() error {
+			_, err := client.CreateAsset(ctx, map[string]any{"assetName": "demo"})
+			return err
+		}},
+		{name: "list assets", call: func() error {
+			_, err := client.ListAssets(ctx, map[string]any{"pageNo": 1})
+			return err
+		}},
+		{name: "get asset", call: func() error {
+			_, err := client.GetAsset(ctx, "asset-1")
+			return err
+		}},
+		{name: "update asset", call: func() error {
+			_, err := client.UpdateAsset(ctx, "asset-1", map[string]any{"assetName": "updated"})
+			return err
+		}},
+		{name: "delete asset", call: func() error {
+			_, err := client.DeleteAsset(ctx, "asset-1")
+			return err
+		}},
+		{name: "create visual session", call: func() error {
+			_, err := client.CreateRealPersonSession(ctx, map[string]any{})
+			return err
+		}},
+		{name: "get visual result", call: func() error {
+			_, err := client.GetAssetGroupByBytedToken(ctx, map[string]any{"bytedToken": "token"})
+			return err
+		}},
+	}
+
+	for _, operation := range operations {
+		operation := operation
+		t.Run(operation.name, func(t *testing.T) {
+			// The test server checks the action in the request URL. This assertion
+			// keeps the provider mapping aligned with the Runyuan API document.
+			require.NoError(t, operation.call())
+		})
+	}
+	assert.Equal(t, len(expectedActions), calls)
 }
 
 func TestRunyuanCancelOrderDoesNotUseMobileCloudEndpoint(t *testing.T) {

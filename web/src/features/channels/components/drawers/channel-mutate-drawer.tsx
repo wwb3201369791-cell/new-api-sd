@@ -961,8 +961,12 @@ export function ChannelMutateDrawer({
         ?.label || `#${currentType}`,
     [currentType]
   )
-  const isMobileCloudTaskPlugin =
+  const isAssetTaskPlugin =
     currentType === CHANNEL_TYPE_TASK_PLUGIN &&
+    ['mobilecloud', 'runyuan'].includes(
+      currentTaskPluginKey?.trim().toLowerCase() || ''
+    )
+  const isMobileCloudAssetProvider =
     currentTaskPluginKey?.trim().toLowerCase() === 'mobilecloud'
   const assetCredentialsConfigured = useMemo(() => {
     return Boolean(
@@ -4231,7 +4235,7 @@ export function ChannelMutateDrawer({
                               </AlertDescription>
                             </Alert>
                           )}
-                          {isMobileCloudTaskPlugin && (
+                          {isAssetTaskPlugin && (
                             <fieldset
                               disabled={sensitiveLocked}
                               className='space-y-4 disabled:opacity-60'
@@ -4243,11 +4247,11 @@ export function ChannelMutateDrawer({
                                   </IconBadge>
                                   <div className='min-w-0 space-y-1'>
                                     <h4 className='text-sm font-semibold'>
-                                      {t('Mobile Cloud asset library')}
+                                      {t('Asset library')}
                                     </h4>
                                     <p className='text-muted-foreground text-xs'>
                                       {t(
-                                        'Optional asset management for Mobile Cloud. Video generation continues to use the channel API key.'
+                                        'Optional asset management for this task provider. Video generation continues to use the channel API key.'
                                       )}
                                     </p>
                                   </div>
@@ -4261,7 +4265,7 @@ export function ChannelMutateDrawer({
                                       <div className='space-y-0.5'>
                                         <FormLabel className='text-sm'>
                                           {t(
-                                            'Enable Mobile Cloud asset library'
+                                            'Enable asset library'
                                           )}
                                         </FormLabel>
                                         <FormDescription>
@@ -4322,13 +4326,17 @@ export function ChannelMutateDrawer({
                                         </FormLabel>
                                         <FormControl>
                                           <Input
-                                            placeholder='https://ecloud.10086.cn'
+                                            placeholder={
+                                              isMobileCloudAssetProvider
+                                                ? 'https://ecloud.10086.cn'
+                                                : 'https://runy.yitd.cn'
+                                            }
                                             {...field}
                                           />
                                         </FormControl>
                                         <FormDescription>
                                           {t(
-                                            'Leave empty to use the Mobile Cloud default endpoint.'
+                                            'Leave empty to use the provider default endpoint.'
                                           )}
                                         </FormDescription>
                                         <FormMessage />
@@ -4336,29 +4344,31 @@ export function ChannelMutateDrawer({
                                     )}
                                   />
 
-                                  <FormField
-                                    control={form.control}
-                                    name='asset_resource_pool'
-                                    render={({ field }) => (
-                                      <FormItem>
-                                        <FormLabel>
-                                          {t('Asset resource pool')}
-                                        </FormLabel>
-                                        <FormControl>
-                                          <Input
-                                            placeholder='CIDC-CORE-00'
-                                            {...field}
-                                          />
-                                        </FormControl>
-                                        <FormDescription>
-                                          {t(
-                                            'Leave empty to use CIDC-CORE-00.'
-                                          )}
-                                        </FormDescription>
-                                        <FormMessage />
-                                      </FormItem>
-                                    )}
-                                  />
+                                  {isMobileCloudAssetProvider && (
+                                    <FormField
+                                      control={form.control}
+                                      name='asset_resource_pool'
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>
+                                            {t('Asset resource pool')}
+                                          </FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              placeholder='CIDC-CORE-00'
+                                              {...field}
+                                            />
+                                          </FormControl>
+                                          <FormDescription>
+                                            {t(
+                                              'Leave empty to use CIDC-CORE-00.'
+                                            )}
+                                          </FormDescription>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}
+                                    />
+                                  )}
 
                                   <FormField
                                     control={form.control}
@@ -4384,7 +4394,7 @@ export function ChannelMutateDrawer({
                                         </FormControl>
                                         <FormDescription>
                                           {t(
-                                            'Separate credential used only for Mobile Cloud asset APIs.'
+                                            'Separate credential used only for asset APIs.'
                                           )}
                                         </FormDescription>
                                         <FormMessage />

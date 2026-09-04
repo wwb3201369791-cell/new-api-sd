@@ -184,7 +184,7 @@ func appendTaskLogInfo(task *model.Task, other *model.LogOther) {
 		other.SetRoot("upstream_task_id", task.PrivateData.UpstreamTaskID)
 	}
 	if task.PrivateData.UpstreamRequestID != "" {
-		rootInfo["upstream_request_id"] = task.PrivateData.UpstreamRequestID
+		other.SetRoot("upstream_request_id", task.PrivateData.UpstreamRequestID)
 	}
 	if task.PrivateData.NodeName != "" {
 		other.SetRoot("node_name", task.PrivateData.NodeName)

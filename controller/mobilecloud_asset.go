@@ -135,6 +135,16 @@ func CreateMobileCloudAssetGroup(c *gin.Context) {
 		return
 	}
 	body["groupType"] = "AIGC"
+	if isRunyuanChannel(channel) {
+		// Runyuan documents AIGC groups as account-scoped and idempotent: one
+		// provider group is shared by all calls made with the same AK/SK. Do not
+		// pretend that a second tenant-local group can be created upstream.
+		assetAPIError(c, &assetConflictError{
+			code:    "ASSET_GROUP_PROVIDER_LIMIT",
+			message: "Runyuan exposes one account-level AIGC asset group; use the default group",
+		})
+		return
+	}
 	groupName := strings.TrimSpace(stringValue(body["groupName"]))
 	if groupName == "" || len([]rune(groupName)) > 64 {
 		assetAPIError(c, errors.New("groupName is required and must be at most 64 characters"))
@@ -196,6 +206,20 @@ func UpdateMobileCloudAssetGroup(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
+	if isRunyuanChannel(channel) {
+		shared, sharedErr := runyuanGroupShared(c.Request.Context(), channel.Id, group.ProviderGroupID)
+		if sharedErr != nil {
+			assetAPIError(c, sharedErr)
+			return
+		}
+		if shared {
+			assetAPIError(c, &assetConflictError{
+				code:    "ASSET_GROUP_SHARED",
+				message: "Runyuan asset group is shared by multiple customers and cannot be updated",
+			})
+			return
+		}
+	}
 	body, err := readAssetJSON(c)
 	if err != nil {
 		assetAPIError(c, err)
@@ -225,6 +249,20 @@ func DeleteMobileCloudAssetGroup(c *gin.Context) {
 	if group.IsDefault {
 		assetAPIError(c, errors.New("default asset group cannot be deleted"))
 		return
+	}
+	if isRunyuanChannel(channel) {
+		shared, sharedErr := runyuanGroupShared(c.Request.Context(), channel.Id, group.ProviderGroupID)
+		if sharedErr != nil {
+			assetAPIError(c, sharedErr)
+			return
+		}
+		if shared {
+			assetAPIError(c, &assetConflictError{
+				code:    "ASSET_GROUP_SHARED",
+				message: "Runyuan asset group is shared by multiple customers and cannot be deleted",
+			})
+			return
+		}
 	}
 	response, err := client.DeleteAssetGroup(c.Request.Context(), group.ProviderGroupID)
 	if err != nil {
@@ -291,6 +329,25 @@ func ListMobileCloudAssets(c *gin.Context) {
 		return
 	}
 	restrictProviderResponse(response, ownedIDs, "groupId")
+	// Runyuan may expose one account-level AIGC group for every customer that
+	// shares the configured AK/SK. Group filtering alone would then return
+	// another customer's assets. Keep only provider asset IDs already indexed
+	// for this customer; assets created outside the gateway remain hidden until
+	// the customer registers them through this API.
+	if response != nil && response.Provider == "runyuan" {
+		ownedAssets, _, indexErr := model.ListMobileCloudAssets(c.Request.Context(), c.GetInt("id"), channel.Id, "", "", "", 0, 10000)
+		if indexErr != nil {
+			assetAPIError(c, indexErr)
+			return
+		}
+		ownedAssetIDs := make(map[string]struct{}, len(ownedAssets))
+		for _, asset := range ownedAssets {
+			if asset.ProviderAssetID != "" {
+				ownedAssetIDs[asset.ProviderAssetID] = struct{}{}
+			}
+		}
+		restrictProviderAssetResponse(response, ownedAssetIDs)
+	}
 	logAssetIndexError(c, "asset", channel.Id, persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
 	assetAPIResponse(c, response)
 }
@@ -883,6 +940,13 @@ func mobileCloudAssetClientForChannel(channel *model.Channel) (*mobilecloudasset
 	})
 }
 
+func isRunyuanChannel(channel *model.Channel) bool {
+	if channel == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(channel.GetSetting().TaskPluginKey), "runyuan")
+}
+
 func providerRequestID(response *mobilecloudasset.Response) string {
 	if response == nil {
 		return ""
@@ -970,6 +1034,34 @@ func restrictProviderResponse(response *mobilecloudasset.Response, allowed map[s
 	}
 }
 
+// restrictProviderAssetResponse applies a second ownership boundary for
+// providers whose group identifier is shared across tenants (Runyuan's
+// account-level AIGC group is one example). An empty allow-list intentionally
+// produces an empty result instead of bypassing the filter.
+func restrictProviderAssetResponse(response *mobilecloudasset.Response, allowed map[string]struct{}) {
+	if response == nil || len(response.Body) == 0 {
+		return
+	}
+	var envelope map[string]any
+	if common.Unmarshal(response.Body, &envelope) != nil {
+		return
+	}
+	if body, ok := envelope["body"]; ok {
+		filtered, _ := restrictProviderValue(body, allowed, "assetId")
+		envelope["body"] = filtered
+	} else {
+		filtered, keep := restrictProviderValue(envelope, allowed, "assetId")
+		if !keep {
+			envelope = map[string]any{"Result": map[string]any{"Items": []any{}, "TotalCount": 0}}
+		} else if value, ok := filtered.(map[string]any); ok {
+			envelope = value
+		}
+	}
+	if data, err := common.Marshal(envelope); err == nil {
+		response.Body = data
+	}
+}
+
 func restrictProviderValue(value any, allowed map[string]struct{}, idKey string) (any, bool) {
 	switch current := value.(type) {
 	case map[string]any:
@@ -1026,7 +1118,7 @@ func providerFieldValue(value map[string]any, field string) string {
 	case "groupId":
 		keys = append(keys, "groupID", "GroupId", "GroupID", "group_id")
 	case "assetId":
-		keys = append(keys, "assetID", "AssetId", "AssetID", "asset_id")
+		keys = append(keys, "assetID", "AssetId", "AssetID", "asset_id", "Id")
 	}
 	for _, key := range keys {
 		if id := stringValue(value[key]); id != "" {
@@ -1293,6 +1385,21 @@ func ensureMobileCloudDefaultGroup(ctx context.Context, userID, channelID int, c
 		return "", err
 	}
 	return providerID, nil
+}
+
+func runyuanGroupShared(ctx context.Context, channelID int, providerID string) (bool, error) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return false, nil
+	}
+	var userIDs []int
+	if err := model.DB.WithContext(ctx).
+		Model(&model.MobileCloudAssetGroup{}).
+		Where("channel_id = ? AND provider_group_id = ?", channelID, providerID).
+		Distinct("user_id").Pluck("user_id", &userIDs).Error; err != nil {
+		return false, err
+	}
+	return len(userIDs) > 1, nil
 }
 
 func providerGroupID(value any) string {
