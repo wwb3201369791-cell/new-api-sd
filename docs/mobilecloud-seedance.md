@@ -138,3 +138,38 @@ provider 插件，复用列表/取消/删除/素材控制器，只实现其鉴�
 可直接运行 `pwsh -File e2e/mobilecloud-seedance.ps1 -BaseUrl
 https://HOST -Token TOKEN` 做真实网关验收。脚本不会接触或输出移动云密钥；
 移动云 Bearer key 必须先在后台的 `mobilecloud` 渠道中配置。
+
+## 网关素材 API 一键烟测
+
+Windows 可运行：
+
+```powershell
+cd new-api\scripts
+.\run_mobilecloud_gateway_asset_test.bat
+```
+
+或直接运行 PowerShell：
+
+```powershell
+pwsh -File .\mobilecloud_gateway_asset_test.ps1 `
+  -BaseUrl "http://127.0.0.1:3000" `
+  -ChannelId CHANNEL_ID
+```
+
+脚本会安全提示输入 New API 客户密钥，并依次验证：默认素材组、创建自定义
+素材组、素材组详情、素材组更新，以及（提供公网 `-AssetUrl` 时）创建素材、
+查询素材列表和素材详情。默认创建的测试组会保留，便于继续手工调试；确认
+完成后加 `-Cleanup` 删除脚本创建的测试组和素材：
+
+```powershell
+pwsh -File .\mobilecloud_gateway_asset_test.ps1 `
+  -BaseUrl "https://HOST" `
+  -Token TOKEN `
+  -AssetUrl "https://PUBLIC_URL/demo.png" `
+  -Cleanup
+```
+
+脚本同时在系统临时目录生成三张极小 PNG 作为本地夹具，测试结束自动清理。
+移动云会从 `assetUrl` 下载素材，因此本地文件、`localhost`、`127.0.0.1` 或
+内网地址不能直接用于上游素材注册；要完成真实素材测试，请传入移动云可访问
+的公网 HTTP(S) 地址。`-SkipAsset` 可只测试素材组流程。
