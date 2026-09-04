@@ -5619,7 +5619,6 @@
     "Introduction": "Introduction",
     "Guides": "Guides",
     "Reference": "Reference",
-    "Installation": "Installation",
     "User guide": "User guide",
     "Administrator guide": "Administrator guide",
     "Seedance / SD guide": "Seedance / SD guide",
@@ -5634,7 +5633,6 @@
     "Requested page": "Requested page",
     "New API gateway": "New API gateway",
     "Understand the gateway, channels, and the two client-facing contracts.": "Understand the gateway, channels, and the two client-facing contracts.",
-    "Run the gateway locally or in a persistent production deployment.": "Run the gateway locally or in a persistent production deployment.",
     "Call models through one New API endpoint without knowing the selected provider.": "Call models through one New API endpoint without knowing the selected provider.",
     "Use one public contract for Mobile Cloud and RunYuan task channels.": "Use one public contract for Mobile Cloud and RunYuan task channels.",
     "Stable endpoints and authentication examples for client integrations.": "Stable endpoints and authentication examples for client integrations."

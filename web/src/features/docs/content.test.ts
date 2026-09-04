@@ -37,6 +37,7 @@ describe('documentation registry', () => {
 
     expect(navigationIds.every((id) => pageIds.has(id))).toBe(true)
     expect(navigationIds).toContain('guide/seedance')
+    expect(navigationIds).not.toContain('installation')
     expect(navigationIds).not.toContain('support')
     expect(navigationIds).not.toContain('policy')
     expect(getDocsPage('unknown-page').id).toBe('overview')

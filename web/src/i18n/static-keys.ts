@@ -579,7 +579,6 @@ export const STATIC_I18N_KEYS = [
   'Introduction',
   'Guides',
   'Reference',
-  'Installation',
   'User guide',
   'Administrator guide',
   'Seedance / SD guide',

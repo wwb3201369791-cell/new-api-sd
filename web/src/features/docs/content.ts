@@ -21,7 +21,6 @@ export type DocsAudience = 'public' | 'user' | 'admin'
 
 export type DocsPageId =
   | 'overview'
-  | 'installation'
   | 'guide/user'
   | 'guide/admin'
   | 'guide/seedance'
@@ -80,33 +79,6 @@ The Seedance task plugin accepts the same task request regardless of whether the
 - **Users:** obtain a token, call \`/v1/video/generations\`, poll the task, and register public asset URLs.
 - **Administrators:** configure channels, provider credentials, asset-library access, routing, and diagnostics.
 - **API reference:** copy request/response examples for the stable public contract.
-`
-  ),
-  installation: page(
-    'installation',
-    'Installation',
-    'Run the gateway locally or in a persistent production deployment.',
-    'public',
-    `# Installation
-
-## Docker Compose (recommended)
-
-Persist the database, uploads, and application configuration on a data volume such as \`/data\`. Keep secrets in environment variables or the deployment secret store, not in the image or documentation.
-
-\`\`\`bash
-docker compose up -d
-docker compose logs -f new-api
-\`\`\`
-
-## First-run checklist
-
-1. Complete the setup wizard and create the administrator account.
-2. Configure a public HTTPS hostname for client traffic and callback URLs.
-3. Create a model group and add a provider channel.
-4. Create a test API token and send a request through \`/v1\`.
-5. Enable backups and monitor request/task logs before onboarding users.
-
-The documentation link can remain local at \`/docs\`, or an administrator can configure a complete external URL when a separately hosted documentation site is preferred.
 `
   ),
   'guide/user': page(
@@ -249,10 +221,7 @@ Send an idempotency key for task creation when the client may retry. Retry only 
 export const DOCS_NAV_GROUPS: DocsNavGroup[] = [
   {
     title: 'Introduction',
-    items: [
-      { id: 'overview', title: 'Overview', href: '/docs' },
-      { id: 'installation', title: 'Installation', href: '/docs/installation' },
-    ],
+    items: [{ id: 'overview', title: 'Overview', href: '/docs' }],
   },
   {
     title: 'Guides',
@@ -302,27 +271,6 @@ Seedance 任务插件使用统一的任务请求格式。实际渠道可以是�
 - **用户：** 获取密钥、调用 \`/v1/video/generations\`、轮询任务并登记公网素材地址。
 - **管理员：** 配置渠道、供应商凭证、素材库、路由和诊断信息。
 - **API 参考：** 查看稳定的请求与响应示例。
-`,
-  installation: `# 部署安装
-
-## Docker Compose（推荐）
-
-将数据库、上传目录和应用配置持久化到 \`/data\` 等数据盘。密钥应放在环境变量或部署平台的密钥存储中，不要写进镜像或文档。
-
-\`\`\`bash
-docker compose up -d
-docker compose logs -f new-api
-\`\`\`
-
-## 首次运行检查
-
-1. 完成初始化向导并创建管理员账号。
-2. 为客户流量和回调地址配置公网 HTTPS 域名。
-3. 创建模型分组并添加供应商渠道。
-4. 创建测试 API 密钥，通过 \`/v1\` 发送请求。
-5. 开启备份，在正式接入用户前观察请求和任务日志。
-
-文档链接可以保留为站内的 \`/docs\`；如需独立托管文档，也可以在系统设置中填写完整的外部 URL。
 `,
   'guide/user': `# 用户指南
 

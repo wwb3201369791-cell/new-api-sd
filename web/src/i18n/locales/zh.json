@@ -5619,7 +5619,6 @@
     "Introduction": "介绍",
     "Guides": "使用指南",
     "Reference": "参考",
-    "Installation": "部署安装",
     "User guide": "用户指南",
     "Administrator guide": "管理员指南",
     "Seedance / SD guide": "Seedance / SD 使用指南",
@@ -5634,7 +5633,6 @@
     "Requested page": "请求页面",
     "New API gateway": "New API 网关",
     "Understand the gateway, channels, and the two client-facing contracts.": "了解网关、渠道以及面向客户的两套稳定契约。",
-    "Run the gateway locally or in a persistent production deployment.": "在本地或持久化生产环境中运行网关。",
     "Call models through one New API endpoint without knowing the selected provider.": "通过一个 New API 接口调用模型，无需了解实际使用的上游厂商。",
     "Use one public contract for Mobile Cloud and RunYuan task channels.": "使用同一套公有协议调用移动云和润元任务渠道。",
     "Stable endpoints and authentication examples for client integrations.": "面向客户端集成的稳定接口和鉴权示例。"
