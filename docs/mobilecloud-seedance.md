@@ -158,8 +158,8 @@ pwsh -File .\mobilecloud_gateway_asset_test.ps1 `
 
 脚本会安全提示输入 New API 客户密钥，并依次验证：默认素材组、创建自定义
 素材组、素材组详情、素材组更新，以及（提供公网 `-AssetUrl` 时）创建素材、
-查询素材列表和素材详情。默认创建的测试组会保留，便于继续手工调试；确认
-完成后加 `-Cleanup` 删除脚本创建的测试组和素材：
+轮询素材列表/详情直到 `ACTIVE` 或 `FAILED`、更新素材名称。默认创建的测试组
+会保留，便于继续手工调试；确认完成后加 `-Cleanup` 删除脚本创建的测试组和素材：
 
 ```powershell
 pwsh -File .\mobilecloud_gateway_asset_test.ps1 `

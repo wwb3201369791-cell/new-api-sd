@@ -19,7 +19,9 @@ param(
   [string]$BaseUrl = "http://127.0.0.1:3000",
   [string]$Token = "",
   [string]$ChannelId = "",
-[string]$AssetUrl = "https://dummyimage.com/512x512/cccccc/000000.png",
+  [string]$AssetUrl = "https://dummyimage.com/512x512/cccccc/000000.png",
+  [int]$AssetPollSeconds = 3,
+  [int]$AssetPollAttempts = 10,
   [switch]$SkipAsset,
   [switch]$Cleanup,
   [switch]$KeepFixtures
@@ -227,17 +229,43 @@ try {
     Write-Step "注册公网素材" "PASS" $assetId
 
     $assetsPath = Add-ChannelQuery "/v1/assets?group_id=$([uri]::EscapeDataString($createdGroupId))"
-    $assetsResponse = Invoke-GatewayJson -Method GET -Path $assetsPath
-    $assetsBody = Get-ProviderBody $assetsResponse
-    $assets = Get-ProviderItems $assetsBody
-    $listed = $assets | Where-Object { (Get-ProviderId -Value $_ -Keys @("assetId", "assetID", "AssetId", "Id")) -eq $assetId } | Select-Object -First 1
+    $listed = $null
+    for ($attempt = 1; $attempt -le [Math]::Max(1, $AssetPollAttempts); $attempt++) {
+      $assetsResponse = Invoke-GatewayJson -Method GET -Path $assetsPath
+      $assetsBody = Get-ProviderBody $assetsResponse
+      $assets = Get-ProviderItems $assetsBody
+      $listed = $assets | Where-Object { (Get-ProviderId -Value $_ -Keys @("assetId", "assetID", "AssetId", "Id")) -eq $assetId } | Select-Object -First 1
+      if ($null -ne $listed) { break }
+      if ($attempt -lt $AssetPollAttempts) { Start-Sleep -Seconds ([Math]::Max(1, $AssetPollSeconds)) }
+    }
     if ($null -eq $listed) { throw "素材创建成功但列表中未找到 $assetId" }
     Write-Step "查询素材列表" "PASS" $assetId
 
-    $assetDetailResponse = Invoke-GatewayJson -Method GET -Path (Add-ChannelQuery "/v1/assets/$([uri]::EscapeDataString($assetId))")
-    $assetDetailId = Get-ProviderId -Value (Get-ProviderBody $assetDetailResponse) -Keys @("assetId", "assetID", "AssetId", "Id")
-    if ($assetDetailId -ne $assetId) { throw "素材详情 ID 不匹配: $assetDetailId" }
-    Write-Step "查询素材详情" "PASS" $assetDetailId
+    $assetDetailResponse = $null
+    $assetDetailBody = $null
+    $assetStatus = ""
+    for ($attempt = 1; $attempt -le [Math]::Max(1, $AssetPollAttempts); $attempt++) {
+      $assetDetailResponse = Invoke-GatewayJson -Method GET -Path (Add-ChannelQuery "/v1/assets/$([uri]::EscapeDataString($assetId))")
+      $assetDetailBody = Get-ProviderBody $assetDetailResponse
+      $assetDetailId = Get-ProviderId -Value $assetDetailBody -Keys @("assetId", "assetID", "AssetId", "Id")
+      if ($assetDetailId -ne $assetId) { throw "素材详情 ID 不匹配: $assetDetailId" }
+      $assetStatus = [string]$assetDetailBody.status
+      if ($assetStatus -in @("ACTIVE", "FAILED")) { break }
+      if ($attempt -lt $AssetPollAttempts) { Start-Sleep -Seconds ([Math]::Max(1, $AssetPollSeconds)) }
+    }
+    if ($assetStatus -eq "FAILED") { throw "移动云素材处理失败: $([string]$assetDetailBody.errorMessage)" }
+    Write-Step "查询素材详情" "PASS" "$assetId status=$assetStatus"
+
+    if ($assetStatus -eq "ACTIVE") {
+      $updatedAssetName = "new-api-e2e-$runId-updated"
+      $updatedAsset = Invoke-GatewayJson -Method PUT -Path (Add-ChannelQuery "/v1/assets/$([uri]::EscapeDataString($assetId))") -Body @{ assetName = $updatedAssetName }
+      $updatedAssetBody = Get-ProviderBody $updatedAsset
+      $returnedAssetName = [string]$updatedAssetBody.assetName
+      if ($returnedAssetName -and $returnedAssetName -ne $updatedAssetName) { throw "素材更新名称不匹配: $returnedAssetName" }
+      Write-Step "更新素材名称" "PASS" $updatedAssetName
+    } else {
+      Write-Step "更新素材名称" "SKIP" "当前状态为 $assetStatus，移动云仅允许 ACTIVE 素材更新"
+    }
   }
 
   if ($Cleanup) {
