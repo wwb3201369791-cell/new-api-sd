@@ -64,6 +64,7 @@ import { AnnouncementsPanel } from './announcements-panel'
 import { ApiInfoPanel } from './api-info-panel'
 import { FAQPanel } from './faq-panel'
 import { PerformanceHealthPanel } from './performance-health-panel'
+import { buildCurlCommand, normalizeEndpoint } from './request-example'
 import { SummaryCards } from './summary-cards'
 import { UptimePanel } from './uptime-panel'
 
@@ -137,26 +138,6 @@ function saveSetupGuideExpanded(expanded: boolean): void {
   )
 }
 
-function getCurrentOrigin(): string {
-  if (typeof window === 'undefined') return ''
-  return window.location.origin
-}
-
-function normalizeEndpoint(sourceUrl?: string): string {
-  const fallback = `${getCurrentOrigin()}/v1/chat/completions`
-  const trimmed = sourceUrl?.trim()
-  if (!trimmed) return fallback
-
-  const withoutTrailingSlash = trimmed.replace(/\/+$/, '')
-  if (withoutTrailingSlash.endsWith('/v1/chat/completions')) {
-    return withoutTrailingSlash
-  }
-  if (withoutTrailingSlash.endsWith('/v1')) {
-    return `${withoutTrailingSlash}/chat/completions`
-  }
-  return `${withoutTrailingSlash}/v1/chat/completions`
-}
-
 function getPreferredKey(keys: ApiKey[]): ApiKey | null {
   return keys.find((item) => item.status === 1) ?? keys[0] ?? null
 }
@@ -165,19 +146,6 @@ function formatDisplayKey(key?: string): string {
   if (!key) return 'sk-...'
   if (key.length <= 14) return key
   return `${key.slice(0, 7)}...${key.slice(-4)}`
-}
-
-function buildCurlCommand(args: {
-  endpoint: string
-  apiKey: string
-  model: string
-}): string {
-  return [
-    `curl ${args.endpoint} \\`,
-    '  -H "Content-Type: application/json" \\',
-    `  -H "Authorization: Bearer ${args.apiKey}" \\`,
-    `  -d '{"model":"${args.model}","messages":[{"role":"user","content":"Say hello in one sentence."}]}'`,
-  ].join('\n')
 }
 
 function SetupGuideBackdrop(props: { compact?: boolean }) {
@@ -585,8 +553,8 @@ export function OverviewDashboard() {
   )
 
   const requestExample = useMemo<RequestExample>(() => {
-    const endpoint = normalizeEndpoint(apiInfoItems[0]?.url)
     const model = modelsQuery.data?.[0] ?? 'gpt-4o-mini'
+    const endpoint = normalizeEndpoint(apiInfoItems[0]?.url, model)
     const keyName = preferredKey?.name ?? t('No API key yet')
     const ready = Boolean(preferredKey?.id && model)
 
