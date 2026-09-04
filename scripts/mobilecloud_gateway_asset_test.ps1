@@ -19,7 +19,7 @@ param(
   [string]$BaseUrl = "http://127.0.0.1:3000",
   [string]$Token = "",
   [string]$ChannelId = "",
-  [string]$AssetUrl = "https://httpbin.org/image/png",
+[string]$AssetUrl = "https://dummyimage.com/512x512/cccccc/000000.png",
   [switch]$SkipAsset,
   [switch]$Cleanup,
   [switch]$KeepFixtures
@@ -49,9 +49,32 @@ function Invoke-GatewayJson {
   if ($IdempotencyKey) { $headers["Idempotency-Key"] = $IdempotencyKey }
   $uri = "$script:BaseUrl$Path"
   try {
+    $request = @{
+      Method = $Method
+      Uri = $uri
+      Headers = $headers
+    }
     if ($null -ne $Body) {
-      $json = $Body | ConvertTo-Json -Depth 20 -Compress
-      return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -ContentType "application/json" -Body $json
+      $request.ContentType = "application/json"
+      $request.Body = $Body | ConvertTo-Json -Depth 20 -Compress
+    }
+
+    # PowerShell 7 disposes HttpResponseMessage.Content before a thrown
+    # Invoke-RestMethod exception can read it.  Invoke-WebRequest with
+    # -SkipHttpErrorCheck preserves the provider's JSON error body, which is
+    # essential when diagnosing rejected asset URLs.
+    $iwr = Get-Command Invoke-WebRequest -ErrorAction Stop
+    if ($iwr.Parameters.ContainsKey("SkipHttpErrorCheck")) {
+      $response = Invoke-WebRequest @request -SkipHttpErrorCheck
+      $status = [int]$response.StatusCode
+      $content = [string]$response.Content
+      if ($status -ge 400) { throw "HTTP ${status}: ${content}" }
+      if ([string]::IsNullOrWhiteSpace($content)) { return $null }
+      return $content | ConvertFrom-Json
+    }
+
+    if ($null -ne $Body) {
+      return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -ContentType "application/json" -Body $request.Body
     }
     return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
   } catch {

@@ -172,4 +172,5 @@ pwsh -File .\mobilecloud_gateway_asset_test.ps1 `
 脚本同时在系统临时目录生成三张极小 PNG 作为本地夹具，测试结束自动清理。
 移动云会从 `assetUrl` 下载素材，因此本地文件、`localhost`、`127.0.0.1` 或
 内网地址不能直接用于上游素材注册；要完成真实素材测试，请传入移动云可访问
-的公网 HTTP(S) 地址。`-SkipAsset` 可只测试素材组流程。
+的公网 HTTP(S) 地址。脚本默认使用一个 512×512 的公开测试图片，也可以通过
+`-AssetUrl` 替换；`-SkipAsset` 可只测试素材组流程。
