@@ -33,7 +33,12 @@ import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { DOCS_NAV_GROUPS, getDocsPageId, type DocsPage } from './content'
+import {
+  DOCS_NAV_GROUPS,
+  getDocsMarkdown,
+  getDocsPageId,
+  type DocsPage,
+} from './content'
 import { getArticleHeadings } from './docs-article-headings'
 import { DocsPageArticle } from './docs-page'
 
@@ -98,12 +103,19 @@ function AccessDenied({ page }: { page: DocsPage }) {
 }
 
 export function DocsShell({ page, accessDenied = false }: DocsShellProps) {
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
   const pathname = window.location.pathname
   const { auth } = useAuthStore()
   const canSeeAdmin = (auth.user?.role ?? ROLE.GUEST) >= ROLE.ADMIN
   const { copiedText, copyToClipboard } = useCopyToClipboard()
-  const headings = useMemo(() => getArticleHeadings(page), [page])
+  const markdown = useMemo(
+    () => getDocsMarkdown(page, i18n.language),
+    [i18n.language, page]
+  )
+  const headings = useMemo(
+    () => getArticleHeadings(page, markdown),
+    [markdown, page]
+  )
 
   const visibleGroups = useMemo(
     () =>
@@ -188,19 +200,17 @@ export function DocsShell({ page, accessDenied = false }: DocsShellProps) {
               <Button
                 variant='outline'
                 size='sm'
-                onClick={() => void copyToClipboard(page.markdown)}
+                onClick={() => void copyToClipboard(markdown)}
                 aria-label={t('Copy Markdown')}
               >
                 <Copy className='size-3.5' aria-hidden='true' />
-                {copiedText === page.markdown
-                  ? t('Copied')
-                  : t('Copy Markdown')}
+                {copiedText === markdown ? t('Copied') : t('Copy Markdown')}
               </Button>
             </div>
             {accessDenied ? (
               <AccessDenied page={page} />
             ) : (
-              <DocsPageArticle page={page} />
+              <DocsPageArticle page={page} markdown={markdown} />
             )}
           </main>
 

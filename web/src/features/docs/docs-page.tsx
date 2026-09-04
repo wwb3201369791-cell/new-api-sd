@@ -24,9 +24,13 @@ import { slugifyDocsHeading, type DocsPage } from './content'
 
 type DocsPageArticleProps = {
   page: DocsPage
+  markdown?: string
 }
 
-export function DocsPageArticle({ page }: DocsPageArticleProps) {
+export function DocsPageArticle({
+  page,
+  markdown = page.markdown,
+}: DocsPageArticleProps) {
   const articleRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -40,11 +44,11 @@ export function DocsPageArticle({ page }: DocsPageArticleProps) {
       usedIds.set(base, count + 1)
       heading.id = count === 0 ? base : `${base}-${count + 1}`
     })
-  }, [page.markdown])
+  }, [markdown])
 
   return (
     <div ref={articleRef}>
-      <Markdown>{page.markdown}</Markdown>
+      <Markdown>{markdown}</Markdown>
     </div>
   )
 }

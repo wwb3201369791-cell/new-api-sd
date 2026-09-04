@@ -26,8 +26,6 @@ export type DocsPageId =
   | 'guide/admin'
   | 'guide/seedance'
   | 'api'
-  | 'support'
-  | 'policy'
 
 export type DocsPage = {
   id: DocsPageId
@@ -246,40 +244,6 @@ The gateway returns \`X-Oneapi-Request-Id\`. Save it with the response body for 
 Send an idempotency key for task creation when the client may retry. Retry only transient failures and preserve the original request ID. Do not retry a rejected URL, invalid credential, or malformed JSON without fixing the request.
 `
   ),
-  support: page(
-    'support',
-    'Help and support',
-    'Collect the identifiers and checks needed to resolve a failed request quickly.',
-    'public',
-    `# Help and support
-
-Include these fields in a support ticket:
-
-- timestamp with timezone;
-- New API request ID from the response header;
-- upstream request ID and task ID, if returned;
-- endpoint, model, and a redacted request body;
-- client-visible status and message.
-
-Never send an API token, provider secret, signed URL query, or private media URL in a ticket. Administrators can inspect the redacted request/response pair and upstream error code in the operation logs.
-
-For asset failures, first verify that the URL is reachable from the provider network and returns the expected content type. A URL that opens in a local browser may still be blocked by provider egress policy.
-`
-  ),
-  policy: page(
-    'policy',
-    'Compliance and use policy',
-    'Operate the gateway only with authorized accounts, content, and provider capabilities.',
-    'public',
-    `# Compliance and use policy
-
-Use only provider accounts, API keys, quotas, media, and model capabilities for which your organization has authorization. Follow upstream terms, applicable laws, privacy requirements, retention rules, and content-safety policies.
-
-Do not place secrets in client-side code or documentation. Limit administrator access, rotate provider credentials, retain only the logs required for operations, and remove test assets after verification.
-
-This page is an operational reminder rather than legal advice. Consult your compliance owner for requirements specific to your deployment and customer contracts.
-`
-  ),
 }
 
 export const DOCS_NAV_GROUPS: DocsNavGroup[] = [
@@ -308,17 +272,177 @@ export const DOCS_NAV_GROUPS: DocsNavGroup[] = [
   },
   {
     title: 'Reference',
-    items: [
-      { id: 'api', title: 'API reference', href: '/docs/api' },
-      { id: 'support', title: 'Help and support', href: '/docs/support' },
-      {
-        id: 'policy',
-        title: 'Compliance and use policy',
-        href: '/docs/policy',
-      },
-    ],
+    items: [{ id: 'api', title: 'API reference', href: '/docs/api' }],
   },
 ]
+
+/**
+ * Chinese documentation is kept beside the English source instead of adding
+ * another locale or another language switch. The existing application locale
+ * decides which copy is rendered in the documentation center.
+ */
+const DOCS_MARKDOWN_ZH: Partial<Record<DocsPageId, string>> = {
+  overview: `# New API 网关
+
+New API 是位于客户应用与模型供应商之间的统一网关。客户只需要一个 API 地址和一枚 New API 密钥，管理员负责决定每个模型实际使用的渠道。
+
+## 网关提供的能力
+
+- 通过兼容 OpenAI 的 \`/v1\` 接口提供对话、媒体和任务模型。
+- 按模型、分组、优先级、权重、健康状态和重试策略选择渠道。
+- 将供应商凭证保存在服务端，并完成字段、状态码和任务状态映射。
+- 在日志中关联客户请求 ID、上游请求 ID 和异步任务 ID。
+
+## Seedance 支持
+
+Seedance 任务插件使用统一的任务请求格式。实际渠道可以是移动云、润元或其他兼容供应商，客户不需要为每个上游单独开发 SDK。
+
+## 选择文档
+
+- **用户：** 获取密钥、调用 \`/v1/video/generations\`、轮询任务并登记公网素材地址。
+- **管理员：** 配置渠道、供应商凭证、素材库、路由和诊断信息。
+- **API 参考：** 查看稳定的请求与响应示例。
+`,
+  installation: `# 部署安装
+
+## Docker Compose（推荐）
+
+将数据库、上传目录和应用配置持久化到 \`/data\` 等数据盘。密钥应放在环境变量或部署平台的密钥存储中，不要写进镜像或文档。
+
+\`\`\`bash
+docker compose up -d
+docker compose logs -f new-api
+\`\`\`
+
+## 首次运行检查
+
+1. 完成初始化向导并创建管理员账号。
+2. 为客户流量和回调地址配置公网 HTTPS 域名。
+3. 创建模型分组并添加供应商渠道。
+4. 创建测试 API 密钥，通过 \`/v1\` 发送请求。
+5. 开启备份，在正式接入用户前观察请求和任务日志。
+
+文档链接可以保留为站内的 \`/docs\`；如需独立托管文档，也可以在系统设置中填写完整的外部 URL。
+`,
+  'guide/user': `# 用户指南
+
+## 1. 创建并保护密钥
+
+在控制台创建 API 密钥，并使用 \`Authorization: Bearer TOKEN\` 请求。密钥等同于密码，不要放进浏览器代码、公开仓库或截图。
+
+## 2. 使用统一地址
+
+\`\`\`text
+https://YOUR_HOST/v1
+\`\`\`
+
+网关会根据模型和管理员路由配置选择渠道。客户端只使用模型列表中的模型名，不需要知道供应商的主机地址。
+
+## 3. 提交并轮询 Seedance 任务
+
+视频任务可调用 \`POST /v1/video/generations\`（兼容旧路径）或 \`POST /v1/videos\`（OpenAI 视频路径）。响应会返回任务 ID，使用对应的查询接口轮询，直到状态为 \`succeeded\` 或 \`failed\`。遇到问题时请保留响应中的请求 ID。
+
+## 4. 使用素材接口
+
+ToB 场景优先使用供应商可访问的公网 HTTPS 地址：
+
+\`\`\`http
+POST /v1/assets
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"assetName":"character","assetType":"Image","assetUrl":"https://PUBLIC_HOST/character.png"}
+\`\`\`
+
+每个用户都有默认素材组。不传 \`groupId\` 时自动使用默认组；需要隔离时调用 \`POST /v1/asset-groups\` 创建素材组，并使用返回的 ID。网关会校验归属，用户不能操作其他用户的素材组。
+
+素材由上游异步下载，公网 URL 模式下网关不保存媒体文件。
+`,
+  'guide/admin': `# 管理员指南
+
+## 渠道配置
+
+每套上游凭证创建一个渠道，并可以为多个渠道配置相同的模型名，例如 \`doubao-seedance-2.0\`。视频生成使用渠道凭证；移动云素材管理启用后，在渠道高级设置中填写独立的 Access Key 和 Secret Key。
+
+## 素材库策略
+
+素材库开关是可选的。启用后，网关为选定供应商签名素材请求，并将凭证保存在服务端。每个用户的默认素材组按需创建，也可以通过 \`POST /v1/asset-groups\` 显式创建其他分组。上游组 ID 不能绕过本地归属校验。
+
+## 路由与错误
+
+通过模型和分组路由在移动云、润元之间分配流量。网关把鉴权失败、限流、超时、上游不可用和参数错误映射为稳定的客户端错误，同时在日志中保留脱敏后的上游详情。
+
+## 日志与排查
+
+先按 New API 请求 ID 搜索，再查看上游请求 ID 和任务 ID。敏感请求头与凭证会脱敏。素材请求失败时，检查供应商端点、资源池、Access Key/Secret Key、公网 URL 的可达性、DNS/TLS 以及供应商侧访问策略。
+`,
+  'guide/seedance': `# Seedance / SD 使用指南
+
+## 客户端契约
+
+所有请求都使用 New API 地址和密钥。客户端不直接选择移动云或润元，渠道选择由管理员的路由配置完成。
+
+## 视频请求
+
+\`\`\`json
+{
+  "model": "doubao-seedance-2.0",
+  "prompt": "A short product introduction",
+  "duration": 5,
+  "aspect_ratio": "16:9"
+}
+\`\`\`
+
+网关会完成供应商字段映射并返回任务对象。按文档间隔轮询，存在 \`Retry-After\` 时遵循该值，并在配置的超时后停止轮询。
+
+## 素材引用
+
+将 \`POST /v1/assets\` 返回的素材 ID 写成 \`asset://ASSET_ID\` 使用；上游允许时也可以直接传入已审核的公网 URL。素材类型填写 \`Image\`、\`Video\` 或 \`Audio\`，虚拟人物、真实人物和音频的审核规则由供应商执行。
+
+## 排查清单
+
+记录 \`X-Oneapi-Request-Id\`、任务 ID 和最终状态。4xx 通常表示请求或凭证校验失败；超时或 5xx 表示网关未能及时取得可用的上游结果。管理员可在日志中区分两类问题。
+`,
+  api: `# API 参考
+
+## 鉴权
+
+\`\`\`http
+Authorization: Bearer TOKEN
+Content-Type: application/json
+X-Request-Id: OPTIONAL_CLIENT_ID
+\`\`\`
+
+网关会返回 \`X-Oneapi-Request-Id\`。请将它与响应体一起保存，用于审计和问题定位。
+
+## 核心接口
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | \`/v1/models\` | 列出可用的对话和任务插件模型 |
+| POST | \`/v1/video/generations\` | 提交兼容旧路径的 Seedance 任务 |
+| POST | \`/v1/videos\` | 提交 OpenAI 视频任务 |
+| GET | \`/v1/video/generations/{taskId}\` | 查询旧路径任务 |
+| GET | \`/v1/videos/{taskId}\` | 查询 OpenAI 视频任务 |
+| GET | \`/api/v3/contents/generations/tasks\` | Ark 兼容任务列表 |
+| GET | \`/v1/asset-groups\` | 查询当前用户可见的素材组 |
+| POST | \`/v1/asset-groups\` | 创建名称唯一的素材组 |
+| POST | \`/v1/assets\` | 登记供应商可访问的公网地址 |
+| GET | \`/v1/assets\` | 查询所属素材组中的素材 |
+| GET | \`/v1/assets/{assetId}\` | 查询素材详情 |
+
+## 幂等与重试
+
+任务创建可能重试时请携带幂等键，并保留原始请求 ID。只重试临时性失败；拒绝的 URL、无效凭证或格式错误应先修正请求。
+`,
+}
+
+export function getDocsMarkdown(page: DocsPage, language?: string): string {
+  if (language?.toLowerCase().startsWith('zh')) {
+    return DOCS_MARKDOWN_ZH[page.id] ?? page.markdown
+  }
+  return page.markdown
+}
 
 export function getDocsPage(id: string | undefined): DocsPage {
   if (!id) return DOCS_PAGES.overview

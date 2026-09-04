@@ -584,8 +584,6 @@ export const STATIC_I18N_KEYS = [
   'Administrator guide',
   'Seedance / SD guide',
   'API reference',
-  'Help and support',
-  'Compliance and use policy',
   'Copy Markdown',
   'Copied',
   'On this page',

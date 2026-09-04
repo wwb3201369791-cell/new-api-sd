@@ -5624,8 +5624,6 @@
     "Administrator guide": "管理员指南",
     "Seedance / SD guide": "Seedance / SD 使用指南",
     "API reference": "API 参考",
-    "Help and support": "帮助支持",
-    "Compliance and use policy": "合规与使用政策",
     "Copy Markdown": "复制 Markdown",
     "Copied": "已复制",
     "On this page": "本页目录",
@@ -5639,8 +5637,6 @@
     "Run the gateway locally or in a persistent production deployment.": "在本地或持久化生产环境中运行网关。",
     "Call models through one New API endpoint without knowing the selected provider.": "通过一个 New API 接口调用模型，无需了解实际使用的上游厂商。",
     "Use one public contract for Mobile Cloud and RunYuan task channels.": "使用同一套公有协议调用移动云和润元任务渠道。",
-    "Stable endpoints and authentication examples for client integrations.": "面向客户端集成的稳定接口和鉴权示例。",
-    "Collect the identifiers and checks needed to resolve a failed request quickly.": "收集快速定位失败请求所需的标识和检查项。",
-    "Operate the gateway only with authorized accounts, content, and provider capabilities.": "仅使用已获授权的账户、内容和上游服务能力运行网关。"
+    "Stable endpoints and authentication examples for client integrations.": "面向客户端集成的稳定接口和鉴权示例。"
   }
 }

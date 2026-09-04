@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { getDocsHeadings, slugifyDocsHeading, type DocsPage } from './content'
 
-export function getArticleHeadings(page: DocsPage) {
+export function getArticleHeadings(page: DocsPage, markdown = page.markdown) {
   const usedIds = new Map<string, number>()
-  return getDocsHeadings(page.markdown).map((title) => {
+  return getDocsHeadings(markdown).map((title) => {
     const base = slugifyDocsHeading(title)
     const count = usedIds.get(base) ?? 0
     usedIds.set(base, count + 1)

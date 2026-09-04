@@ -22,6 +22,7 @@ import { canViewDocsPage } from './access'
 import {
   DOCS_NAV_GROUPS,
   DOCS_PAGES,
+  getDocsMarkdown,
   getDocsHeadings,
   getDocsPage,
   slugifyDocsHeading,
@@ -36,7 +37,21 @@ describe('documentation registry', () => {
 
     expect(navigationIds.every((id) => pageIds.has(id))).toBe(true)
     expect(navigationIds).toContain('guide/seedance')
+    expect(navigationIds).not.toContain('support')
+    expect(navigationIds).not.toContain('policy')
     expect(getDocsPage('unknown-page').id).toBe('overview')
+  })
+
+  test('uses the existing Chinese locale without adding documentation locales', () => {
+    expect(getDocsMarkdown(DOCS_PAGES.overview, 'zhCN')).toContain(
+      '# New API 网关'
+    )
+    expect(getDocsMarkdown(DOCS_PAGES.overview, 'zhTW')).toContain(
+      '# New API 网关'
+    )
+    expect(getDocsMarkdown(DOCS_PAGES.overview, 'fr')).toContain(
+      '# New API gateway'
+    )
   })
 
   test('gates administrator guidance by role', () => {
