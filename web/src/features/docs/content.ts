@@ -171,15 +171,15 @@ The gateway normalizes provider fields and returns a task object. Poll at the do
 
 ## Asset references
 
-Use the asset ID returned by \`POST /v1/assets\` as \`asset://ASSET_ID\`, or pass an approved public URL when the selected channel allows it. Classify the media as \`Image\`, \`Video\`, or \`Audio\`.
+After registering an asset with \`POST /v1/assets\`, poll \`GET /v1/assets/{assetId}\` until it is approved, then use its returned \`assetUrl\` in the video request. You may also pass an approved public URL directly when the selected channel allows it. Classify the media as \`Image\`, \`Video\`, or \`Audio\`.
 
 ## Virtual and real-person assets
 
 - **Virtual/cartoon characters:** register the image as \`assetType: "Image"\` in the default AIGC group (or a group created with \`POST /v1/asset-groups\`). No liveness session is required.
 - **Real people:** use \`POST /v1/real-person-auth/sessions\` first, let the person complete the returned verification page, then exchange the returned token with \`POST /v1/real-person-auth/asset-group/by-byted-token\`. Use the returned group ID for the verified asset. Do not submit a real-person image to the ordinary AIGC group flow.
-- **Audio:** register it with \`assetType: "Audio"\` and use the returned \`asset://ASSET_ID\` reference where the selected video model accepts audio.
+- **Audio:** register it with \`assetType: "Audio"\`, wait for approval, and use the returned \`assetUrl\` where the selected video model accepts audio.
 
-The gateway returns semantic review messages only. Channel names, raw moderation codes, signed URLs, and credential details are available to administrators in redacted diagnostics, not to API users.
+The gateway returns semantic review messages only. Channel names, provider-specific headers, raw moderation codes, and credential details are available only to administrators in redacted diagnostics. An approved asset's \`assetUrl\` is returned when the video task needs a media address; use it only for task submission or preview.
 
 ## Debug checklist
 
@@ -355,15 +355,15 @@ Content-Type: application/json
 
 ## 素材引用
 
-将 \`POST /v1/assets\` 返回的素材 ID 写成 \`asset://ASSET_ID\` 使用；选定渠道允许时也可以直接传入已审核的公网 URL。素材类型填写 \`Image\`、\`Video\` 或 \`Audio\`。
+调用 \`POST /v1/assets\` 后轮询 \`GET /v1/assets/{assetId}\`，状态通过审核后使用返回的 \`assetUrl\` 调用视频接口；选定渠道允许时也可以直接传入已审核的公网 URL。素材类型填写 \`Image\`、\`Video\` 或 \`Audio\`。
 
 ## 虚拟人物与真实人物
 
 - **虚拟人物/卡通人物：** 使用默认 AIGC 素材组，或先调用 \`POST /v1/asset-groups\` 创建分组，再以 \`assetType: "Image"\` 登记素材。不需要真人认证会话。
 - **真实人物：** 先调用 \`POST /v1/real-person-auth/sessions\` 创建认证会话，让本人完成返回的认证页面，再将返回的令牌提交到 \`POST /v1/real-person-auth/asset-group/by-byted-token\` 获取已认证素材组，随后使用该组 ID 登记素材。不要把真实人物图片直接放入普通 AIGC 流程。
-- **音频：** 以 \`assetType: "Audio"\` 登记，在视频模型支持时引用返回的 \`asset://ASSET_ID\`。
+- **音频：** 以 \`assetType: "Audio"\` 登记，审核通过后在视频模型支持时引用返回的 \`assetUrl\`。
 
-网关只向客户返回语义化的审核提示；渠道名称、原始审核码、签名 URL 和凭证详情仅保留在管理员可见的脱敏诊断中。
+网关只向客户返回语义化的审核提示；渠道名称、厂商专有响应头、原始审核码和凭证详情仅保留在管理员可见的脱敏诊断中。审核通过素材的 \`assetUrl\` 会在视频任务需要时返回，仅用于提交任务或预览。
 
 ## 排查清单
 
