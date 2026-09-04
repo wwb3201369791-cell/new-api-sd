@@ -160,12 +160,14 @@ Use the New API base URL and token for every request. The client does not select
 
 \`\`\`json
 {
-  "model": "doubao-seedance-2.0",
+  "model": "MODEL_ALIAS",
   "prompt": "A short product introduction",
   "duration": 5,
   "aspect_ratio": "16:9"
 }
 \`\`\`
+
+Replace \`MODEL_ALIAS\` with the client-facing model alias shown in your model list. The alias is intentionally independent of the selected channel.
 
 The gateway normalizes provider fields and returns a task object. Poll at the documented interval, honor \`Retry-After\` when present, and stop polling after the configured timeout.
 
@@ -344,12 +346,14 @@ Content-Type: application/json
 
 \`\`\`json
 {
-  "model": "doubao-seedance-2.0",
+  "model": "MODEL_ALIAS",
   "prompt": "A short product introduction",
   "duration": 5,
   "aspect_ratio": "16:9"
 }
 \`\`\`
+
+将 \`MODEL_ALIAS\` 替换为模型列表中显示的客户侧模型别名。该别名与实际选择的渠道解耦，不包含厂商名称。
 
 网关会完成供应商字段映射并返回任务对象。按文档间隔轮询，存在 \`Retry-After\` 时遵循该值，并在配置的超时后停止轮询。
 
