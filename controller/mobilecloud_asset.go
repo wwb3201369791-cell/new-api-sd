@@ -140,8 +140,8 @@ func CreateMobileCloudAssetGroup(c *gin.Context) {
 		// provider group is shared by all calls made with the same AK/SK. Do not
 		// pretend that a second tenant-local group can be created upstream.
 		assetAPIError(c, &assetConflictError{
-			code:    "ASSET_GROUP_PROVIDER_LIMIT",
-			message: "Runyuan exposes one account-level AIGC asset group; use the default group",
+			code:    "ASSET_GROUP_LIMIT",
+			message: "当前素材服务仅提供一个默认 AIGC 素材组，请直接使用默认素材组",
 		})
 		return
 	}
@@ -215,7 +215,7 @@ func UpdateMobileCloudAssetGroup(c *gin.Context) {
 		if shared {
 			assetAPIError(c, &assetConflictError{
 				code:    "ASSET_GROUP_SHARED",
-				message: "Runyuan asset group is shared by multiple customers and cannot be updated",
+				message: "该素材组正在被多个客户使用，当前无法更新",
 			})
 			return
 		}
@@ -259,7 +259,7 @@ func DeleteMobileCloudAssetGroup(c *gin.Context) {
 		if shared {
 			assetAPIError(c, &assetConflictError{
 				code:    "ASSET_GROUP_SHARED",
-				message: "Runyuan asset group is shared by multiple customers and cannot be deleted",
+				message: "该素材组正在被多个客户使用，当前无法删除",
 			})
 			return
 		}
@@ -593,8 +593,15 @@ func UploadMobileCloudAsset(c *gin.Context) {
 	if providerErr != nil {
 		// Keep the uploaded object in the response so the user can retry
 		// provider registration without uploading the bytes again.
-		result["provider_error"] = providerErr.Error()
-		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": providerErr.Error(), "data": result})
+		var providerResponseErr *mobilecloudasset.ProviderError
+		if !errors.As(providerErr, &providerResponseErr) || providerResponseErr == nil {
+			assetAPIError(c, providerErr)
+			return
+		}
+		logger.LogWarn(c.Request.Context(), "asset provider response status=%d code=%q detail=%q", providerResponseErr.StatusCode, providerResponseErr.Code, common.LocalLogPreview(common.MaskSensitiveInfo(providerResponseErr.Message)))
+		status, code, message := publicAssetProviderError(providerResponseErr)
+		result["error"] = gin.H{"code": code, "message": message}
+		c.JSON(status, gin.H{"success": false, "code": code, "message": message, "data": result})
 		return
 	}
 	logAssetIndexError(c, "asset", channel.Id, persistAssets(c.Request.Context(), c.GetInt("id"), channel.Id, providerBody(response)))
@@ -1129,9 +1136,10 @@ func providerFieldValue(value map[string]any, field string) string {
 }
 
 // normalizeRunyuanAssetBody converts Runyuan's Ark Action envelope into the
-// stable camelCase shape consumed by the existing local asset index. The raw
-// provider response is still returned to API callers; normalization is only
-// used for persistence and local ownership lookups.
+// stable camelCase shape consumed by the existing local asset index and public
+// asset contract. Provider-specific Action/ResponseMetadata fields are kept
+// out of client responses; the raw response remains available to the
+// administrator diagnostics path before this projection.
 func normalizeRunyuanAssetBody(envelope map[string]any) map[string]any {
 	result, ok := envelope["Result"].(map[string]any)
 	if !ok || result == nil {
@@ -1513,8 +1521,26 @@ func assetAPIResponse(c *gin.Context, response *mobilecloudasset.Response) {
 	}
 	var value any
 	if err := common.Unmarshal(response.Body, &value); err != nil {
-		common.ApiSuccess(c, gin.H{"raw": string(response.Body)})
+		common.ApiSuccess(c, gin.H{"raw": "素材服务返回了无法解析的响应"})
 		return
+	}
+	if response.Provider == "runyuan" {
+		// Present the same envelope for every configured channel. The provider's
+		// Action/ResponseMetadata fields are implementation details and are not
+		// part of the public asset contract.
+		if envelope, ok := value.(map[string]any); ok {
+			body := normalizeRunyuanAssetBody(envelope)
+			if _, leaked := body["ResponseMetadata"]; leaked {
+				body = map[string]any{}
+			}
+			value = map[string]any{
+				"requestId":    providerRequestID(response),
+				"state":        "OK",
+				"errorCode":    nil,
+				"errorMessage": nil,
+				"body":         body,
+			}
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": value})
 }
@@ -1538,26 +1564,28 @@ func assetAPIError(c *gin.Context, err error) {
 				if transportErr.IsTimeout() {
 					status = http.StatusGatewayTimeout
 					code = "ASSET_PROVIDER_TIMEOUT"
-					message = "asset provider request timed out; check the upstream endpoint and network path"
+					message = "素材请求超时，请稍后重试。"
 				} else {
 					status = http.StatusBadGateway
 					code = "ASSET_PROVIDER_UNREACHABLE"
-					message = "asset provider connection failed; check server egress, DNS/TLS, or provider allowlist"
+					message = "素材服务暂时不可用，请稍后重试。"
 				}
 				logger.LogWarn(c.Request.Context(), "asset provider transport error provider=%s method=%s path=%s timeout=%t cause=%s", transportErr.Provider, transportErr.Method, transportErr.Path, transportErr.IsTimeout(), transportErr.CauseType())
 			} else {
 				var providerErr *mobilecloudasset.ProviderError
 				if errors.As(err, &providerErr) && providerErr != nil {
-					message = providerErr.Error()
-					status = providerErr.StatusCode
-					code = "ASSET_PROVIDER_ERROR"
-					if status < 400 || status > 599 {
-						status = http.StatusBadGateway
-					} else if status >= 500 {
-						status = http.StatusBadGateway
-					}
+					// Keep the provider response in operator logs, but return a
+					// provider-neutral message to API users.  In particular, do not
+					// expose moderation codes such as PrivacyInformation.
+					logger.LogWarn(c.Request.Context(), "asset provider response status=%d code=%q detail=%q", providerErr.StatusCode, providerErr.Code, common.LocalLogPreview(common.MaskSensitiveInfo(providerErr.Message)))
+					status, code, message = publicAssetProviderError(providerErr)
 				} else if err != nil && strings.TrimSpace(err.Error()) != "" {
 					message = err.Error()
+					if isAssetInternalDetail(message) {
+						status = http.StatusServiceUnavailable
+						code = "ASSET_SERVICE_UNAVAILABLE"
+						message = "素材服务暂时不可用，请稍后重试。"
+					}
 				}
 			}
 		}
@@ -1569,13 +1597,96 @@ func assetAPIError(c *gin.Context, err error) {
 	c.JSON(status, response)
 }
 
+// publicAssetProviderError converts an upstream asset response into the
+// stable, provider-neutral contract exposed to API users.  The original
+// ProviderError is logged above for administrator diagnostics only.
+func publicAssetProviderError(providerErr *mobilecloudasset.ProviderError) (int, string, string) {
+	if providerErr == nil {
+		return http.StatusBadGateway, "ASSET_PROVIDER_ERROR", "素材服务暂时不可用，请稍后重试。"
+	}
+	status := providerErr.StatusCode
+	if isAssetContentRejected(providerErr.Code, providerErr.Message) {
+		return http.StatusUnprocessableEntity, "ASSET_CONTENT_REJECTED", "素材未通过审核，请更换素材后重试。"
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return http.StatusBadGateway, "ASSET_SERVICE_CONFIG", "素材服务配置暂不可用，请联系管理员。"
+	case http.StatusTooManyRequests:
+		return http.StatusTooManyRequests, "ASSET_RATE_LIMITED", "素材服务当前繁忙，请稍后重试。"
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return http.StatusGatewayTimeout, "ASSET_PROVIDER_TIMEOUT", "素材请求超时，请稍后重试。"
+	default:
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		if status >= 500 {
+			status = http.StatusBadGateway
+		}
+		return status, "ASSET_PROVIDER_ERROR", "素材请求未通过校验，请检查参数和公网素材地址。"
+	}
+}
+
+func isAssetContentRejected(code, message string) bool {
+	value := strings.ToLower(strings.TrimSpace(code + " " + message))
+	for _, marker := range []string{
+		"privacyinformation",
+		"privacy information",
+		"sensitivecontent",
+		"sensitive content",
+		"contentmoderation",
+		"content moderation",
+		"content_safety",
+		"content safety",
+		"内容审核",
+		"隐私信息",
+		"真人肖像",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAssetInternalDetail(message string) bool {
+	value := strings.ToLower(strings.TrimSpace(message))
+	for _, marker := range []string{
+		"mobile cloud",
+		"runyuan",
+		"asset provider",
+		"accesskey",
+		"access key",
+		"secretkey",
+		"secret key",
+		"ecloud.",
+		"asset_base_url",
+		"provider base url",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func providerResponseValue(response *mobilecloudasset.Response) any {
 	if response == nil || len(response.Body) == 0 {
 		return nil
 	}
 	var value any
 	if err := common.Unmarshal(response.Body, &value); err != nil {
-		return gin.H{"raw": string(response.Body)}
+		return gin.H{"raw": "素材服务返回了无法解析的响应"}
+	}
+	if response.Provider == "runyuan" {
+		if envelope, ok := value.(map[string]any); ok {
+			return map[string]any{
+				"requestId":    providerRequestID(response),
+				"state":        "OK",
+				"errorCode":    nil,
+				"errorMessage": nil,
+				"body":         normalizeRunyuanAssetBody(envelope),
+			}
+		}
 	}
 	return value
 }

@@ -250,7 +250,15 @@ func PublicTaskError(taskErr *taskdto.TaskError, requestID string) *taskdto.Task
 	code := strings.TrimSpace(publicErr.Code)
 	message := strings.TrimSpace(publicErr.Message)
 
-	if errors.Is(publicErr.Error, context.DeadlineExceeded) || code == "upstream_timeout" || status == http.StatusGatewayTimeout || status == http.StatusRequestTimeout {
+	// Provider moderation responses are intentionally collapsed into a stable,
+	// provider-neutral client error.  The original TaskError is still passed to
+	// the diagnostics/logging path, so operators retain the upstream code while
+	// clients never learn which provider performed the review.
+	if !publicErr.LocalError && isTaskContentRejected(code, message) {
+		status = http.StatusUnprocessableEntity
+		code = "content_rejected"
+		message = "素材未通过审核，请更换素材后重试。"
+	} else if errors.Is(publicErr.Error, context.DeadlineExceeded) || code == "upstream_timeout" || status == http.StatusGatewayTimeout || status == http.StatusRequestTimeout {
 		status = http.StatusConflict
 		code = "upstream_timeout"
 		message = "上游处理超时，请稍后查询任务状态或重试。"
@@ -289,6 +297,32 @@ func PublicTaskError(taskErr *taskdto.TaskError, requestID string) *taskdto.Task
 		publicErr.Message = common.MessageWithRequestId(publicErr.Message, requestID)
 	}
 	return &publicErr
+}
+
+// isTaskContentRejected recognizes the moderation/face-privacy error families
+// returned by task providers.  Matching is deliberately conservative and
+// based on stable terms rather than a provider-specific code so the public API
+// remains unchanged when a channel is replaced.
+func isTaskContentRejected(code, message string) bool {
+	value := strings.ToLower(strings.TrimSpace(code + " " + message))
+	for _, marker := range []string{
+		"privacyinformation",
+		"privacy information",
+		"sensitivecontent",
+		"sensitive content",
+		"contentmoderation",
+		"content moderation",
+		"content_safety",
+		"content safety",
+		"内容审核",
+		"隐私信息",
+		"真人肖像",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // TaskErrorFromAPIError 将 PreConsumeBilling 返回的 NewAPIError 转换为 TaskError。

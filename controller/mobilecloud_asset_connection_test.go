@@ -138,7 +138,8 @@ func TestTestMobileCloudAssetConnectionMapsUpstreamDisconnectToBadGateway(t *tes
 
 	require.Equal(t, http.StatusBadGateway, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"code":"ASSET_PROVIDER_UNREACHABLE"`)
-	assert.Contains(t, recorder.Body.String(), "asset provider connection failed")
+	assert.Contains(t, recorder.Body.String(), "素材服务暂时不可用")
+	assert.NotContains(t, recorder.Body.String(), "ecloud.example")
 	assert.NotContains(t, recorder.Body.String(), "ASSET_AK")
 	assert.NotContains(t, recorder.Body.String(), "ASSET_SK")
 }

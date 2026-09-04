@@ -77,6 +77,26 @@ func TestArkSeedanceTaskResponsePreservesDocumentedMetadata(t *testing.T) {
 	assert.Equal(t, float64(7), response["seed"])
 }
 
+func TestArkSeedanceTaskResponseHidesProviderModerationDetails(t *testing.T) {
+	task := &model.Task{
+		TaskID:     "task-moderation",
+		Status:     model.TaskStatusFailure,
+		Properties: model.Properties{OriginModelName: "doubao-seedance-2.0"},
+		Data:       []byte(`{"status":"failed","error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"private provider detail"}}`),
+	}
+
+	body, taskErr := buildArkSeedanceTaskResponse(task)
+	require.Nil(t, taskErr)
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(body, &response))
+	errorValue, ok := response["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "content_rejected", errorValue["code"])
+	assert.Contains(t, errorValue["message"], "素材未通过审核")
+	assert.NotContains(t, errorValue["message"], "PrivacyInformation")
+	assert.NotContains(t, errorValue["message"], "private provider detail")
+}
+
 func TestArkSeedanceTaskPathRecognizesCreateAndRetrieve(t *testing.T) {
 	assert.True(t, IsArkSeedanceTaskPath("/api/v3/contents/generations/tasks"))
 	assert.True(t, IsArkSeedanceTaskPath("/api/v3/contents/generations/tasks/cgt-1"))

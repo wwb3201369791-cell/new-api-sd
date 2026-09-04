@@ -640,13 +640,34 @@ func buildArkSeedanceTaskResponse(task *model.Task) ([]byte, *dto.TaskError) {
 		response["usage"] = rawUsage
 	}
 	if rawError, ok := upstream["error"].(map[string]any); ok && len(rawError) > 0 {
-		response["error"] = rawError
+		// Project provider failures through the same public error contract used
+		// by task submission. This prevents moderation codes and other channel
+		// diagnostics from appearing when a client polls a failed task.
+		rawCode := ""
+		if value, exists := rawError["code"]; exists {
+			rawCode = strings.TrimSpace(fmt.Sprint(value))
+		}
+		rawMessage := ""
+		if value, exists := rawError["message"]; exists {
+			rawMessage = strings.TrimSpace(fmt.Sprint(value))
+		}
+		publicErr := service.PublicTaskError(&dto.TaskError{
+			Code:       rawCode,
+			Message:    rawMessage,
+			StatusCode: http.StatusBadRequest,
+		}, "")
+		response["error"] = map[string]any{"code": publicErr.Code, "message": publicErr.Message}
 	} else if status == "failed" || status == "expired" || status == "cancelled" {
 		message := strings.TrimSpace(task.FailReason)
 		if message == "" {
 			message = status
 		}
-		response["error"] = map[string]any{"code": "task_failed", "message": message}
+		publicErr := service.PublicTaskError(&dto.TaskError{
+			Code:       "task_failed",
+			Message:    message,
+			StatusCode: http.StatusBadRequest,
+		}, "")
+		response["error"] = map[string]any{"code": publicErr.Code, "message": publicErr.Message}
 	}
 
 	if rawContent, ok := upstream["content"].(map[string]any); ok && len(rawContent) > 0 {

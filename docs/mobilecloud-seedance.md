@@ -95,6 +95,8 @@ ID，因而可以用“网关请求 ID → 上游请求 ID → 任务 ID”定�
 - `POST /api/mobilecloud/billing/orders/cancel`
 
 以上素材组/素材接口同时提供 `/v1/asset-groups` 和 `/v1/assets` 厂商无关别名。
+客户端响应使用统一的网关字段；渠道名称、厂商专有响应头、签名 URL 和原始审核码不会
+返回给 API 用户，仅在管理员可见的脱敏日志中保留。
 计费查询和退订接口也提供 `/v1/billing/...` 别名；退订请求体至少要包含非空的
 `instanceIds` 数组。该接口只对移动云渠道转发，润元渠道会明确返回功能不可用，避免
 误把移动云路径发送到润元。
@@ -120,8 +122,10 @@ HTTP/1.1，避免移动云素材网关在 HTTP/2 下提前关闭连接。
 ## 错误、超时与幂等
 
 上游错误会保留在管理员日志（敏感字段脱敏、正文截断），对客户返回稳定的
-语义错误：503→409 `upstream_busy`、501→422 `feature_unavailable`、网关或
-上游超时→409 `upstream_timeout`、401/403→凭证错误、429→429 `rate_limited`。
+语义错误：审核拒绝→422 `content_rejected`/`ASSET_CONTENT_REJECTED`、503→409
+`upstream_busy`、501→422 `feature_unavailable`、网关或上游超时→409
+`upstream_timeout`、401/403→凭证错误、429→429 `rate_limited`。客户不会看到渠道名称
+或原始拒绝原因。
 任务创建的单次上游请求默认 120 秒，可通过
 `TASK_UPSTREAM_TIMEOUT_SECONDS` 调整。创建阶段按现有 `RETRY_TIMES` 对 429/5xx
 重试；素材查询、详情及幂等更新/删除遇到连接提前关闭时，会重新签名并做最多

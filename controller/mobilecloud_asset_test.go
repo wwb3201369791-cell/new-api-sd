@@ -2,10 +2,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	mobilecloudasset "github.com/QuantumNous/new-api/service/mobilecloudasset"
 	"github.com/gin-gonic/gin"
@@ -204,6 +206,78 @@ func TestAssetAPIErrorMapsDuplicateGroupNameToConflict(t *testing.T) {
 	require.Equal(t, http.StatusConflict, response.Code)
 	require.Contains(t, response.Body.String(), `"code":"ASSET_GROUP_NAME_EXISTS"`)
 	require.Contains(t, response.Body.String(), "already exists")
+}
+
+func TestAssetAPIErrorHidesProviderModerationDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assets", nil)
+
+	assetAPIError(context, &mobilecloudasset.ProviderError{
+		StatusCode: http.StatusBadRequest,
+		Code:       "InputImageSensitiveContentDetected.PrivacyInformation",
+		Message:    "private provider detail",
+	})
+
+	require.Equal(t, http.StatusUnprocessableEntity, response.Code)
+	require.Contains(t, response.Body.String(), `"code":"ASSET_CONTENT_REJECTED"`)
+	require.Contains(t, response.Body.String(), "素材未通过审核")
+	require.NotContains(t, response.Body.String(), "PrivacyInformation")
+	require.NotContains(t, response.Body.String(), "private provider detail")
+}
+
+func TestAssetAPIErrorHidesProviderConfigurationDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodGet, "/v1/asset-groups", nil)
+
+	assetAPIError(context, errors.New("no Mobile Cloud or Runyuan channel with asset AccessKey/SecretKey is configured"))
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.Contains(t, response.Body.String(), `"code":"ASSET_SERVICE_UNAVAILABLE"`)
+	require.Contains(t, response.Body.String(), "素材服务暂时不可用")
+	require.NotContains(t, response.Body.String(), "Mobile Cloud")
+	require.NotContains(t, response.Body.String(), "Runyuan")
+	require.NotContains(t, response.Body.String(), "AccessKey")
+}
+
+func TestAssetAPIResponseNormalizesRunyuanEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodGet, "/v1/asset-groups", nil)
+
+	assetAPIResponse(context, &mobilecloudasset.Response{
+		Provider:   "runyuan",
+		StatusCode: http.StatusOK,
+		Body:       []byte(`{"ResponseMetadata":{"RequestId":"runyuan-private-id","Action":"ListAssetGroups"},"Result":{"Id":"group-1","Name":"demo","GroupType":"AIGC"}}`),
+	})
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), `"requestId":"runyuan-private-id"`)
+	require.Contains(t, response.Body.String(), `"groupId":"group-1"`)
+	require.NotContains(t, response.Body.String(), "ResponseMetadata")
+	require.NotContains(t, response.Body.String(), "ListAssetGroups")
+}
+
+func TestProviderResponseValueNormalizesRunyuanCreateEnvelope(t *testing.T) {
+	value := providerResponseValue(&mobilecloudasset.Response{
+		Provider: "runyuan",
+		Body:     []byte(`{"ResponseMetadata":{"RequestId":"runyuan-private-id","Action":"CreateAsset"},"Result":{"Id":"asset-1","Name":"demo","URL":"https://upstream.example/demo.png","AssetType":"Image"}}`),
+	})
+	envelope, ok := value.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "runyuan-private-id", envelope["requestId"])
+	require.NotContains(t, envelope, "ResponseMetadata")
+	body, ok := envelope["body"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "asset-1", body["assetId"])
+	require.Equal(t, "demo", body["assetName"])
+	data, err := common.Marshal(value)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "CreateAsset")
 }
 
 func TestPersistCreatedAssetKeepsTerminalProviderStatus(t *testing.T) {

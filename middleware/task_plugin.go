@@ -1355,7 +1355,7 @@ func sanitizedTaskPluginError(status int, detail string) dto.TaskPluginError {
 
 func isPublicTaskPluginErrorCode(code string) bool {
 	switch strings.TrimSpace(code) {
-	case "upstream_timeout", "upstream_busy", "upstream_unavailable", "feature_unavailable", "channel_credential_invalid", "rate_limited", "idempotency_in_progress", "invalid_idempotency_key":
+	case "upstream_timeout", "upstream_busy", "upstream_unavailable", "feature_unavailable", "channel_credential_invalid", "rate_limited", "content_rejected", "idempotency_in_progress", "invalid_idempotency_key":
 		return true
 	default:
 		return false

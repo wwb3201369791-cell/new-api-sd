@@ -93,6 +93,24 @@ func TestPublicTaskErrorMapsProviderFailures(t *testing.T) {
 	}
 }
 
+func TestPublicTaskErrorHidesProviderModerationDetails(t *testing.T) {
+	t.Parallel()
+
+	taskErr := TaskErrorWrapper(
+		errors.New("InputImageSensitiveContentDetected.PrivacyInformation: face detected"),
+		"InputImageSensitiveContentDetected.PrivacyInformation",
+		http.StatusBadRequest,
+	)
+	got := PublicTaskError(taskErr, "req-moderation-1")
+
+	require.Equal(t, http.StatusUnprocessableEntity, got.StatusCode)
+	require.Equal(t, "content_rejected", got.Code)
+	require.Contains(t, got.Message, "素材未通过审核")
+	require.Contains(t, got.Message, "req-moderation-1")
+	require.NotContains(t, got.Message, "PrivacyInformation")
+	require.NotContains(t, got.Message, "face detected")
+}
+
 func TestTaskErrorRedactsCredentials(t *testing.T) {
 	t.Parallel()
 	got := TaskErrorWrapper(errors.New("authorization: Bearer SECRET access_key=AK secret_key=SK"), "upstream", http.StatusBadGateway)

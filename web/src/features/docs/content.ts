@@ -61,18 +61,18 @@ export const DOCS_PAGES: Record<DocsPageId, DocsPage> = {
     'public',
     `# New API gateway
 
-New API is the client-facing gateway between your application and configured model providers. Clients keep one API base URL and one New API token; administrators decide which channel serves each model.
+New API is the client-facing gateway between your application and configured model channels. Clients keep one API base URL and one New API token; administrators decide which channel serves each model.
 
 ## What the gateway does
 
 - Presents an OpenAI-compatible \`/v1\` surface for chat, media, and task models.
 - Selects channels by model, group, priority, weight, health, and retry policy.
-- Keeps provider credentials on the server and maps provider-specific fields, status codes, and task states.
+- Keeps channel credentials on the server and maps channel-specific fields, status codes, and task states.
 - Correlates the client request ID, upstream request ID, and asynchronous task ID in logs.
 
 ## Seedance support
 
-The Seedance task plugin accepts the same task request regardless of whether the selected channel is Mobile Cloud, RunYuan, or another compatible provider. A client does not need a separate SDK for every upstream.
+The Seedance task plugin accepts the same task request regardless of which compatible channel is selected. A client does not need a separate SDK for each channel.
 
 ## Choose a guide
 
@@ -98,7 +98,7 @@ Create an API key in the console and send it as \`Authorization: Bearer TOKEN\`.
 https://YOUR_HOST/v1
 \`\`\`
 
-The gateway chooses the configured channel. Clients should use the model name shown in the model list, not a provider-specific hostname.
+The gateway chooses the configured channel. Clients should use the model name shown in the model list, not a channel-specific hostname.
 
 ## 3. Submit and poll a Seedance task
 
@@ -148,13 +148,13 @@ Search by the New API request ID, then inspect the upstream request ID and task 
   'guide/seedance': page(
     'guide/seedance',
     'Seedance / SD guide',
-    'Use one public contract for Mobile Cloud and RunYuan task channels.',
+    'Use one public contract for all configured task channels.',
     'public',
     `# Seedance / SD guide
 
 ## Client contract
 
-Use the New API base URL and token for every request. The client does not select Mobile Cloud or RunYuan directly; channel routing is an administrator concern.
+Use the New API base URL and token for every request. The client does not select a task channel directly; channel routing is an administrator concern.
 
 ## Video request
 
@@ -171,7 +171,15 @@ The gateway normalizes provider fields and returns a task object. Poll at the do
 
 ## Asset references
 
-Use the asset ID returned by \`POST /v1/assets\` as \`asset://ASSET_ID\`, or pass a provider-approved public URL when the upstream contract allows it. Classify the media as \`Image\`, \`Video\`, or \`Audio\`; virtual-person, real-person, and audio policies remain provider-side validation rules.
+Use the asset ID returned by \`POST /v1/assets\` as \`asset://ASSET_ID\`, or pass an approved public URL when the selected channel allows it. Classify the media as \`Image\`, \`Video\`, or \`Audio\`.
+
+## Virtual and real-person assets
+
+- **Virtual/cartoon characters:** register the image as \`assetType: "Image"\` in the default AIGC group (or a group created with \`POST /v1/asset-groups\`). No liveness session is required.
+- **Real people:** use \`POST /v1/real-person-auth/sessions\` first, let the person complete the returned verification page, then exchange the returned token with \`POST /v1/real-person-auth/asset-group/by-byted-token\`. Use the returned group ID for the verified asset. Do not submit a real-person image to the ordinary AIGC group flow.
+- **Audio:** register it with \`assetType: "Audio"\` and use the returned \`asset://ASSET_ID\` reference where the selected video model accepts audio.
+
+The gateway returns semantic review messages only. Channel names, raw moderation codes, signed URLs, and credential details are available to administrators in redacted diagnostics, not to API users.
 
 ## Debug checklist
 
@@ -207,9 +215,11 @@ The gateway returns \`X-Oneapi-Request-Id\`. Save it with the response body for 
 | GET | \`/api/v3/contents/generations/tasks\` | Ark-compatible task listing |
 | GET | \`/v1/asset-groups\` | List groups visible to the current user |
 | POST | \`/v1/asset-groups\` | Create a uniquely named group |
-| POST | \`/v1/assets\` | Register a provider-reachable public URL |
+| POST | \`/v1/assets\` | Register an approved public URL |
 | GET | \`/v1/assets\` | List assets in an owned group |
 | GET | \`/v1/assets/{assetId}\` | Read an asset detail |
+| POST | \`/v1/real-person-auth/sessions\` | Start a real-person verification session |
+| POST | \`/v1/real-person-auth/asset-group/by-byted-token\` | Resolve the verified real-person group |
 
 ## Idempotency and retries
 
@@ -253,18 +263,18 @@ export const DOCS_NAV_GROUPS: DocsNavGroup[] = [
 const DOCS_MARKDOWN_ZH: Partial<Record<DocsPageId, string>> = {
   overview: `# New API 网关
 
-New API 是位于客户应用与模型供应商之间的统一网关。客户只需要一个 API 地址和一枚 New API 密钥，管理员负责决定每个模型实际使用的渠道。
+New API 是位于客户应用与模型服务之间的统一网关。客户只需要一个 API 地址和一枚 New API 密钥，管理员负责决定每个模型实际使用的渠道。
 
 ## 网关提供的能力
 
 - 通过兼容 OpenAI 的 \`/v1\` 接口提供对话、媒体和任务模型。
 - 按模型、分组、优先级、权重、健康状态和重试策略选择渠道。
-- 将供应商凭证保存在服务端，并完成字段、状态码和任务状态映射。
+- 将渠道凭证保存在服务端，并完成字段、状态码和任务状态映射。
 - 在日志中关联客户请求 ID、上游请求 ID 和异步任务 ID。
 
 ## Seedance 支持
 
-Seedance 任务插件使用统一的任务请求格式。实际渠道可以是移动云、润元或其他兼容供应商，客户不需要为每个上游单独开发 SDK。
+Seedance 任务插件使用统一的任务请求格式。实际渠道由管理员配置，客户不需要为每个渠道单独开发 SDK。
 
 ## 选择文档
 
@@ -284,7 +294,7 @@ Seedance 任务插件使用统一的任务请求格式。实际渠道可以是�
 https://YOUR_HOST/v1
 \`\`\`
 
-网关会根据模型和管理员路由配置选择渠道。客户端只使用模型列表中的模型名，不需要知道供应商的主机地址。
+网关会根据模型和管理员路由配置选择渠道。客户端只使用模型列表中的模型名，不需要知道渠道的主机地址。
 
 ## 3. 提交并轮询 Seedance 任务
 
@@ -328,7 +338,7 @@ Content-Type: application/json
 
 ## 客户端契约
 
-所有请求都使用 New API 地址和密钥。客户端不直接选择移动云或润元，渠道选择由管理员的路由配置完成。
+所有请求都使用 New API 地址和密钥。客户端不直接选择具体渠道，渠道选择由管理员的路由配置完成。
 
 ## 视频请求
 
@@ -345,7 +355,15 @@ Content-Type: application/json
 
 ## 素材引用
 
-将 \`POST /v1/assets\` 返回的素材 ID 写成 \`asset://ASSET_ID\` 使用；上游允许时也可以直接传入已审核的公网 URL。素材类型填写 \`Image\`、\`Video\` 或 \`Audio\`，虚拟人物、真实人物和音频的审核规则由供应商执行。
+将 \`POST /v1/assets\` 返回的素材 ID 写成 \`asset://ASSET_ID\` 使用；选定渠道允许时也可以直接传入已审核的公网 URL。素材类型填写 \`Image\`、\`Video\` 或 \`Audio\`。
+
+## 虚拟人物与真实人物
+
+- **虚拟人物/卡通人物：** 使用默认 AIGC 素材组，或先调用 \`POST /v1/asset-groups\` 创建分组，再以 \`assetType: "Image"\` 登记素材。不需要真人认证会话。
+- **真实人物：** 先调用 \`POST /v1/real-person-auth/sessions\` 创建认证会话，让本人完成返回的认证页面，再将返回的令牌提交到 \`POST /v1/real-person-auth/asset-group/by-byted-token\` 获取已认证素材组，随后使用该组 ID 登记素材。不要把真实人物图片直接放入普通 AIGC 流程。
+- **音频：** 以 \`assetType: "Audio"\` 登记，在视频模型支持时引用返回的 \`asset://ASSET_ID\`。
+
+网关只向客户返回语义化的审核提示；渠道名称、原始审核码、签名 URL 和凭证详情仅保留在管理员可见的脱敏诊断中。
 
 ## 排查清单
 
@@ -375,9 +393,11 @@ X-Request-Id: OPTIONAL_CLIENT_ID
 | GET | \`/api/v3/contents/generations/tasks\` | Ark 兼容任务列表 |
 | GET | \`/v1/asset-groups\` | 查询当前用户可见的素材组 |
 | POST | \`/v1/asset-groups\` | 创建名称唯一的素材组 |
-| POST | \`/v1/assets\` | 登记供应商可访问的公网地址 |
+| POST | \`/v1/assets\` | 登记已审核且可访问的公网地址 |
 | GET | \`/v1/assets\` | 查询所属素材组中的素材 |
 | GET | \`/v1/assets/{assetId}\` | 查询素材详情 |
+| POST | \`/v1/real-person-auth/sessions\` | 创建真人认证会话 |
+| POST | \`/v1/real-person-auth/asset-group/by-byted-token\` | 获取已认证真人素材组 |
 
 ## 幂等与重试
 

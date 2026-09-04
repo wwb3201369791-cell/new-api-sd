@@ -71,4 +71,17 @@ describe('documentation registry', () => {
       'use-asset-asset-id'
     )
   })
+
+  test('keeps public SD guidance channel-neutral and documents person flows', () => {
+    const english = getDocsMarkdown(DOCS_PAGES['guide/seedance'], 'en')
+    const chinese = getDocsMarkdown(DOCS_PAGES['guide/seedance'], 'zhCN')
+
+    expect(english).toContain('/v1/real-person-auth/sessions')
+    expect(english).toContain('/v1/real-person-auth/asset-group/by-byted-token')
+    expect(english).not.toContain('Mobile Cloud')
+    expect(english).not.toContain('RunYuan')
+    expect(chinese).toContain('虚拟人物/卡通人物')
+    expect(chinese).toContain('/v1/real-person-auth/sessions')
+    expect(chinese).not.toContain('移动云或润元')
+  })
 })

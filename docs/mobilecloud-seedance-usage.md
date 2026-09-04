@@ -96,7 +96,7 @@ curl.exe -L -o .\result.mp4 "$BaseUrl/v1/videos/TASK_ID/content" `
 
 ### 图生视频
 
-移动云需要上游可以访问的公网 HTTP(S) 地址：
+选定渠道需要服务端可以访问的公网 HTTP(S) 地址：
 
 ```json
 {
@@ -113,6 +113,19 @@ curl.exe -L -o .\result.mp4 "$BaseUrl/v1/videos/TASK_ID/content" `
 
 `localhost`、`127.0.0.1`、内网地址或需要登录的地址不能作为素材 URL；网关
 默认不会保存公网 URL 对应的文件。
+
+### 虚拟人物、真实人物与音频的分类
+
+素材类型由 `assetType` 表示，人物是否需要认证取决于素材内容：
+
+| 场景 | 素材组/接口 | `assetType` | 认证要求 |
+| --- | --- | --- | --- |
+| 卡通、CG、虚拟人物 | 默认 AIGC 组或 `POST /v1/asset-groups` 创建的分组 | `Image` | 不需要真人认证 |
+| 真实人物 | `POST /v1/real-person-auth/sessions`，完成认证后再调用 `POST /v1/real-person-auth/asset-group/by-byted-token` | `Image` | 必须使用认证返回的素材组 |
+| 配音或背景音频 | 默认组或自定义 AIGC 组 | `Audio` | 按渠道内容审核规则处理 |
+
+真实人物流程不能用普通 AIGC 组替代。虚拟人物图片即使外观接近真人，也建议明确标注为
+虚拟/卡通素材；若素材包含可识别的真实人物肖像，应改走真人认证流程。
 
 ## 三、用户调用素材接口
 
@@ -208,14 +221,17 @@ cd new-api\scripts
 
 1. **401/403**：先确认客户端 New API Token 有效；再检查渠道中的视频 Bearer
    key 或素材 AK/SK，二者不能混用。
-2. **400 `ASSET_PROVIDER_ERROR` 且提示下载 URL 失败**：移动云已收到请求，
+2. **400 `ASSET_PROVIDER_ERROR` 且提示素材地址不可访问**：素材服务已收到请求，
    但无法从 `assetUrl` 下载文件。检查公网 DNS、HTTPS 证书、重定向、响应体和
-   防火墙，不是素材组归属问题。
-3. **429**：上游限流，降低并发并等待重试；不要在客户端重复提交没有
+   防火墙，不是素材组归属问题。客户只会看到语义化提示，原始审核码和服务名称只在
+   管理员脱敏日志中保留。
+3. **422 `ASSET_CONTENT_REJECTED`**：素材未通过审核，请更换素材；不要把原始
+   审核码、服务名称或签名 URL 返回给客户。
+4. **429**：上游限流，降低并发并等待重试；不要在客户端重复提交没有
    `Idempotency-Key` 的创建请求。
-4. **503/501/超时**：网关会转换为语义化错误（上游繁忙、功能不可用、上游超时），
+5. **503/501/超时**：网关会转换为语义化错误（服务繁忙、功能不可用、请求超时），
    同时保留管理员日志中的原始状态和错误详情。
-5. **视频预览失败**：先用 `GET /v1/videos/TASK_ID/content` 下载验证，再检查
+6. **视频预览失败**：先用 `GET /v1/videos/TASK_ID/content` 下载验证，再检查
    `TaskPublicAddress` 是否为浏览器可访问的 HTTPS 地址。
 
 每次请求都可以用响应头 `X-Oneapi-Request-Id` 定位；若上游返回请求 ID，还会有
