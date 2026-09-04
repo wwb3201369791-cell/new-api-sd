@@ -170,7 +170,7 @@ function estimateTokens(seconds, resolution) {
 
 function videoInputRatio(model, resolution, content) {
   const video = hasVideo(content);
-  const res = trimmed(resolution).toLowerCase();
+  const res = normalizeResolution(resolution);
   if (!video) return 1;
   // Mobile Cloud pricing differentiates only by video input and resolution:
   // 56/92 for 480p/720p, and 62/102 for 1080p. The ratio is used when a
