@@ -2,6 +2,9 @@
 
 润元渠道通过任务插件接入。对外仍使用 New API 的统一视频接口，调用方不需要区分润元和其他上游；管理员在渠道配置中选择不同的任务插件即可切换上游。
 
+站内使用入口：[`/docs/guide/seedance`](/docs/guide/seedance)；渠道和凭证配置仅供管理员查阅
+[`/docs/guide/admin`](/docs/guide/admin)。
+
 ## 当前支持范围
 
 - `POST /v1/videos`、`GET /v1/videos/{task_id}`；网关提供本地任务删除/取消语义，润元文档当前未公布上游任务 DELETE 接口，因此不会伪造上游取消请求。

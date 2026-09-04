@@ -4,6 +4,9 @@
 [移动云 Seedance 使用与验收说明](mobilecloud-seedance-usage.md)。本文保留接口
 设计与实现细节，使用时优先按该手册执行。
 
+部署后的站内入口：[`/docs/guide/seedance`](/docs/guide/seedance)；管理员配置请看
+[`/docs/guide/admin`](/docs/guide/admin)，客户端接口请看 [`/docs/api`](/docs/api)。
+
 ## 对外接口
 
 客户端继续使用火山方舟 Seedance 兼容接口，不需要感知实际上游：

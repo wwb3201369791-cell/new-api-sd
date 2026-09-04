@@ -4,6 +4,9 @@
 Seedance/素材 API，用户只需要 New API Token；移动云的 Bearer key、素材
 AccessKey/SecretKey 只由管理员保存在对应渠道中，不能交给客户或写入客户端。
 
+上线后的站内版本：用户从 [`/docs/guide/user`](/docs/guide/user) 开始，管理员从
+[`/docs/guide/admin`](/docs/guide/admin) 开始；完整接口表见 [`/docs/api`](/docs/api)。
+
 ## 一、管理员配置
 
 ### 1. 创建移动云视频渠道

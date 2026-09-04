@@ -29,13 +29,15 @@ import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
+import { Route as DocsIndexRouteImport } from './routes/docs/index'
+import { Route as DocsPageRouteImport } from './routes/docs/$page'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
 import { Route as PricingIndexRouteImport } from './routes/pricing/index'
 import { Route as RankingsIndexRouteImport } from './routes/rankings/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
-import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedAssetsIndexRouteImport } from './routes/_authenticated/assets/index'
+import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
@@ -54,6 +56,7 @@ import { Route as AuthenticatedUsageLogsIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenticated/wallet/index'
+import { Route as DocsGuidePageRouteImport } from './routes/docs/guide/$page'
 import { Route as PricingModelIdIndexRouteImport } from './routes/pricing/$modelId/index'
 import { Route as AuthenticatedSystemSettingsAuthIndexRouteImport } from './routes/_authenticated/system-settings/auth/index'
 import { Route as AuthenticatedSystemSettingsAuthSectionRouteImport } from './routes/_authenticated/system-settings/auth/$section'
@@ -169,6 +172,16 @@ const AboutIndexRoute = AboutIndexRouteImport.update({
   path: '/about/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsPageRoute = DocsPageRouteImport.update({
+  id: '/docs/$page',
+  path: '/docs/$page',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OauthProviderRoute = OauthProviderRouteImport.update({
   id: '/oauth/$provider',
   path: '/oauth/$provider',
@@ -194,11 +207,12 @@ const authUserResetRoute = authUserResetRouteImport.update({
   path: '/user/reset',
   getParentRoute: () => authRouteRoute,
 } as any)
-const AuthenticatedAssetsIndexRoute = AuthenticatedAssetsIndexRouteImport.update({
-  id: '/assets/',
-  path: '/assets/',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
+const AuthenticatedAssetsIndexRoute =
+  AuthenticatedAssetsIndexRouteImport.update({
+    id: '/assets/',
+    path: '/assets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedChannelsIndexRoute =
   AuthenticatedChannelsIndexRouteImport.update({
     id: '/channels/',
@@ -310,6 +324,11 @@ const AuthenticatedWalletIndexRoute =
     path: '/wallet/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const DocsGuidePageRoute = DocsGuidePageRouteImport.update({
+  id: '/docs/guide/$page',
+  path: '/docs/guide/$page',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PricingModelIdIndexRoute = PricingModelIdIndexRouteImport.update({
   id: '/pricing/$modelId/',
   path: '/pricing/$modelId/',
@@ -418,8 +437,10 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/chat2link': typeof AuthenticatedChat2linkRoute
+  '/docs/$page': typeof DocsPageRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
+  '/docs/': typeof DocsIndexRoute
   '/pricing/': typeof PricingIndexRoute
   '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
@@ -429,6 +450,7 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/docs/guide/$page': typeof DocsGuidePageRoute
   '/assets/': typeof AuthenticatedAssetsIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -477,8 +499,10 @@ export interface FileRoutesByTo {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/chat2link': typeof AuthenticatedChat2linkRoute
+  '/docs/$page': typeof DocsPageRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about': typeof AboutIndexRoute
+  '/docs': typeof DocsIndexRoute
   '/pricing': typeof PricingIndexRoute
   '/rankings': typeof RankingsIndexRoute
   '/setup': typeof SetupIndexRoute
@@ -488,6 +512,7 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/docs/guide/$page': typeof DocsGuidePageRoute
   '/assets': typeof AuthenticatedAssetsIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
@@ -540,8 +565,10 @@ export interface FileRoutesById {
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
   '/_authenticated/chat2link': typeof AuthenticatedChat2linkRoute
+  '/docs/$page': typeof DocsPageRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
+  '/docs/': typeof DocsIndexRoute
   '/pricing/': typeof PricingIndexRoute
   '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
@@ -551,6 +578,7 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/docs/guide/$page': typeof DocsGuidePageRoute
   '/_authenticated/assets/': typeof AuthenticatedAssetsIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -602,8 +630,10 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/chat2link'
+    | '/docs/$page'
     | '/oauth/$provider'
     | '/about/'
+    | '/docs/'
     | '/pricing/'
     | '/rankings/'
     | '/setup/'
@@ -613,6 +643,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/docs/guide/$page'
+    | '/assets/'
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
@@ -660,8 +692,10 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/chat2link'
+    | '/docs/$page'
     | '/oauth/$provider'
     | '/about'
+    | '/docs'
     | '/pricing'
     | '/rankings'
     | '/setup'
@@ -671,6 +705,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/docs/guide/$page'
+    | '/assets'
     | '/channels'
     | '/dashboard'
     | '/keys'
@@ -721,8 +757,10 @@ export interface FileRouteTypes {
     | '/(errors)/500'
     | '/(errors)/503'
     | '/_authenticated/chat2link'
+    | '/docs/$page'
     | '/oauth/$provider'
     | '/about/'
+    | '/docs/'
     | '/pricing/'
     | '/rankings/'
     | '/setup/'
@@ -732,6 +770,7 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
     | '/_authenticated/usage-logs/$section'
+    | '/docs/guide/$page'
     | '/_authenticated/assets/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
@@ -775,11 +814,14 @@ export interface RootRouteChildren {
   errors404Route: typeof errors404Route
   errors500Route: typeof errors500Route
   errors503Route: typeof errors503Route
+  DocsPageRoute: typeof DocsPageRoute
   OauthProviderRoute: typeof OauthProviderRoute
   AboutIndexRoute: typeof AboutIndexRoute
+  DocsIndexRoute: typeof DocsIndexRoute
   PricingIndexRoute: typeof PricingIndexRoute
   RankingsIndexRoute: typeof RankingsIndexRoute
   SetupIndexRoute: typeof SetupIndexRoute
+  DocsGuidePageRoute: typeof DocsGuidePageRoute
   PricingModelIdIndexRoute: typeof PricingModelIdIndexRoute
 }
 
@@ -923,6 +965,20 @@ declare module '@tanstack/react-router' {
       path: '/about'
       fullPath: '/about/'
       preLoaderRoute: typeof AboutIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/$page': {
+      id: '/docs/$page'
+      path: '/docs/$page'
+      fullPath: '/docs/$page'
+      preLoaderRoute: typeof DocsPageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/oauth/$provider': {
@@ -1099,6 +1155,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/wallet/'
       preLoaderRoute: typeof AuthenticatedWalletIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/docs/guide/$page': {
+      id: '/docs/guide/$page'
+      path: '/docs/guide/$page'
+      fullPath: '/docs/guide/$page'
+      preLoaderRoute: typeof DocsGuidePageRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/pricing/$modelId/': {
       id: '/pricing/$modelId/'
@@ -1292,7 +1355,6 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
-  AuthenticatedAssetsIndexRoute: typeof AuthenticatedAssetsIndexRoute
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
@@ -1300,6 +1362,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
+  AuthenticatedAssetsIndexRoute: typeof AuthenticatedAssetsIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
@@ -1316,7 +1379,6 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
-  AuthenticatedAssetsIndexRoute: AuthenticatedAssetsIndexRoute,
   AuthenticatedSystemSettingsRouteRoute:
     AuthenticatedSystemSettingsRouteRouteWithChildren,
   AuthenticatedChat2linkRoute: AuthenticatedChat2linkRoute,
@@ -1325,6 +1387,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
+  AuthenticatedAssetsIndexRoute: AuthenticatedAssetsIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
@@ -1355,11 +1418,14 @@ const rootRouteChildren: RootRouteChildren = {
   errors404Route: errors404Route,
   errors500Route: errors500Route,
   errors503Route: errors503Route,
+  DocsPageRoute: DocsPageRoute,
   OauthProviderRoute: OauthProviderRoute,
   AboutIndexRoute: AboutIndexRoute,
+  DocsIndexRoute: DocsIndexRoute,
   PricingIndexRoute: PricingIndexRoute,
   RankingsIndexRoute: RankingsIndexRoute,
   SetupIndexRoute: SetupIndexRoute,
+  DocsGuidePageRoute: DocsGuidePageRoute,
   PricingModelIdIndexRoute: PricingModelIdIndexRoute,
 }
 export const routeTree = rootRouteImport

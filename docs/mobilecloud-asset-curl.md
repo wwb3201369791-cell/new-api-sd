@@ -2,6 +2,9 @@
 
 本文用于在客户电脑、移动云 ECS 或网关服务器上，直接调用移动云素材库接口，确认网络、AK/SK 和签名是否正常。
 
+网关用户接口说明见 [`/docs/api`](/docs/api)，管理员排错说明见
+[`/docs/guide/admin`](/docs/guide/admin)。本文命令仅用于上游直连诊断，不替代网关鉴权。
+
 > 这是移动云上游直连测试，不经过 new-api。视频生成渠道的 Bearer API Key 与素材库的 AccessKey/SecretKey 是两套凭证，不能混用。
 
 ## 1. 测试信息
