@@ -123,6 +123,7 @@ func GetBillingExprCopy() map[string]string {
 	}
 	return expressions
 }
+
 func GetPricingSyncData(base map[string]any) map[string]any {
 	extra := make(map[string]any, 2)
 	if modes := GetBillingModeCopy(); len(modes) > 0 {
