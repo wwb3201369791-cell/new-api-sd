@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -241,6 +242,60 @@ func TestAssetAPIErrorHidesProviderConfigurationDetails(t *testing.T) {
 	require.NotContains(t, response.Body.String(), "Mobile Cloud")
 	require.NotContains(t, response.Body.String(), "Runyuan")
 	require.NotContains(t, response.Body.String(), "AccessKey")
+}
+
+func TestCreateMobileCloudAssetAcceptsSnakeCaseJSONFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assets", bytes.NewBufferString(`{
+		"group_id":"group-1",
+		"asset_name":"demo",
+		"asset_url":"https://example.com/demo.png",
+		"asset_type":"Image"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	body, err := readAssetJSON(context)
+	require.NoError(t, err)
+	require.Equal(t, "group-1", body["groupId"])
+	require.Equal(t, "demo", body["assetName"])
+	require.Equal(t, "https://example.com/demo.png", body["assetUrl"])
+	require.Equal(t, "Image", body["assetType"])
+}
+
+func TestCreateMobileCloudAssetPrefersCamelCaseOverSnakeCase(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/assets", bytes.NewBufferString(`{
+		"asset_name":"snake",
+		"assetName":"camel"
+	}`))
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	body, err := readAssetJSON(context)
+	require.NoError(t, err)
+	require.Equal(t, "camel", body["assetName"])
+}
+
+func TestRealPersonAuthSessionAllowsEmptyBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/real-person-auth/sessions?channel_id=2", nil)
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	body, err := readAssetJSONAllowEmpty(context)
+	require.NoError(t, err)
+	require.Empty(t, body)
+}
+
+func TestRealPersonAuthSessionRejectsMalformedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/real-person-auth/sessions?channel_id=2", bytes.NewBufferString(`{"asset_url":`))
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	_, err := readAssetJSONAllowEmpty(context)
+	require.EqualError(t, err, "request body must be valid JSON")
 }
 
 func TestAssetAPIResponseNormalizesRunyuanEnvelope(t *testing.T) {

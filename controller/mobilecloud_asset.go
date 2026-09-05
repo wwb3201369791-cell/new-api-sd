@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -722,7 +723,7 @@ func CreateMobileCloudRealPersonSession(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
-	body, err := readAssetJSON(c)
+	body, err := readAssetJSONAllowEmpty(c)
 	if err != nil {
 		assetAPIError(c, err)
 		return
@@ -991,7 +992,58 @@ func readAssetJSON(c *gin.Context) (map[string]any, error) {
 	if body == nil {
 		body = map[string]any{}
 	}
+	normalizeAssetRequestAliases(body)
 	return body, nil
+}
+
+// readAssetJSONAllowEmpty is used only by endpoints whose upstream contract
+// permits an omitted request body. A missing body is equivalent to an empty
+// JSON object; malformed non-empty JSON remains a client error.
+func readAssetJSONAllowEmpty(c *gin.Context) (map[string]any, error) {
+	if c == nil || c.Request == nil || c.Request.Body == nil {
+		return map[string]any{}, nil
+	}
+	data, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, errors.New("request body must be valid JSON")
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return map[string]any{}, nil
+	}
+	var body map[string]any
+	if err := common.Unmarshal(data, &body); err != nil {
+		return nil, errors.New("request body must be valid JSON")
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	normalizeAssetRequestAliases(body)
+	return body, nil
+}
+
+// normalizeAssetRequestAliases keeps the public asset API compatible with
+// clients that use the snake_case names documented by the OpenAI-style
+// gateway. Provider clients receive the existing camelCase fields. When both
+// forms are supplied, the canonical camelCase value wins deterministically.
+func normalizeAssetRequestAliases(body map[string]any) {
+	aliases := map[string]string{
+		"group_id":   "groupId",
+		"group_type": "groupType",
+		"group_name": "groupName",
+		"asset_name": "assetName",
+		"asset_url":  "assetUrl",
+		"asset_type": "assetType",
+		"page_no":    "pageNo",
+		"page_size":  "pageSize",
+	}
+	for alias, canonical := range aliases {
+		if _, exists := body[canonical]; exists {
+			continue
+		}
+		if value, exists := body[alias]; exists {
+			body[canonical] = value
+		}
+	}
 }
 
 func providerBody(response *mobilecloudasset.Response) any {
