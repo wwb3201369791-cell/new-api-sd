@@ -207,11 +207,16 @@ curl.exe -i -X POST "$BaseUrl/v1/assets" `
 详情轮询到 `status=ACTIVE` 后再用于视频任务：
 
 ```text
-GET    /v1/assets?group_id=GROUP_ID
+GET    /v1/assets?group_id=GROUP_ID&page=1&page_size=20
 GET    /v1/assets/ASSET_ID
 PUT    /v1/assets/ASSET_ID       body: {"assetName":"new-name"}
 DELETE /v1/assets/ASSET_ID
 ```
+
+素材列表的网关参数优先使用上面的 `snake_case` 写法。为兼容移动云客户端，
+也接受 `groupId`/`groupIds`、`pageNo`、`pageSize`、`groupType`、`assetName` 和
+`statuses`；`groupIds` 可以是逗号分隔值或重复参数。指定组后，网关只返回这些
+组中的素材，不会把当前客户其他素材组混入结果。
 
 如果暂时没有公网素材 URL，只能先验证素材组接口；不要把本地生成的 PNG 直接
 作为 `assetUrl`。需要网页代传文件时，管理员必须显式开启

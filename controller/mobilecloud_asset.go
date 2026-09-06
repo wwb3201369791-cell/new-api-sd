@@ -299,29 +299,32 @@ func ListMobileCloudAssets(c *gin.Context) {
 		}
 	}
 	body := map[string]any{
-		"pageNo":    parseAssetPage(c.Query("page")),
-		"pageSize":  parseAssetPageSize(c.Query("page_size")),
+		"pageNo":    parseAssetPage(assetQueryValue(c, "page", "pageNo")),
+		"pageSize":  parseAssetPageSize(assetQueryValue(c, "page_size", "pageSize")),
 		"groupType": "AIGC",
 	}
-	if value := strings.TrimSpace(c.Query("group_id")); value != "" {
-		if _, ok := ownedIDs[value]; !ok {
-			assetAPIError(c, &assetOwnershipError{resource: "asset group", provider: value})
-			return
+	requestedIDs := assetQueryIDs(c, "group_id", "groupId", "group_ids", "groupIds")
+	if len(requestedIDs) > 0 {
+		for _, value := range requestedIDs {
+			if _, ok := ownedIDs[value]; !ok {
+				assetAPIError(c, &assetOwnershipError{resource: "asset group", provider: value})
+				return
+			}
 		}
-		body["groupIds"] = []string{value}
+		body["groupIds"] = requestedIDs
 	} else if len(ownedIDs) > 0 {
 		body["groupIds"] = assetIDKeys(ownedIDs)
 	} else {
 		writeEmptyAssetList(c)
 		return
 	}
-	if value := strings.TrimSpace(c.Query("group_type")); value != "" {
+	if value := assetQueryValue(c, "group_type", "groupType"); value != "" {
 		body["groupType"] = value
 	}
-	if value := strings.TrimSpace(c.Query("name")); value != "" {
+	if value := assetQueryValue(c, "name", "assetName"); value != "" {
 		body["assetName"] = value
 	}
-	if value := strings.TrimSpace(c.Query("status")); value != "" {
+	if value := assetQueryValue(c, "status", "statuses"); value != "" {
 		body["statuses"] = splitAssetIDs(value)
 	}
 	response, err := client.ListAssets(c.Request.Context(), body)
@@ -329,7 +332,18 @@ func ListMobileCloudAssets(c *gin.Context) {
 		assetAPIError(c, err)
 		return
 	}
-	restrictProviderResponse(response, ownedIDs, "groupId")
+	// If a caller requested one or more groups, apply the same allow-list to
+	// the response. Some upstream revisions ignore groupIds and return every
+	// group visible to the provider account; returning that data would make a
+	// filtered gateway request look like an unfiltered one.
+	responseGroups := ownedIDs
+	if len(requestedIDs) > 0 {
+		responseGroups = make(map[string]struct{}, len(requestedIDs))
+		for _, id := range requestedIDs {
+			responseGroups[id] = struct{}{}
+		}
+	}
+	restrictProviderResponse(response, responseGroups, "groupId")
 	// Runyuan may expose one account-level AIGC group for every customer that
 	// shares the configured AK/SK. Group filtering alone would then return
 	// another customer's assets. Keep only provider asset IDs already indexed
@@ -1810,4 +1824,49 @@ func splitAssetIDs(value string) []string {
 		}
 	}
 	return ids
+}
+
+// assetQueryValue accepts the gateway's snake_case query names and the
+// camelCase names used by the upstream Mobile Cloud API. The first non-empty
+// value wins, so the documented gateway spelling remains deterministic when a
+// client sends both forms.
+func assetQueryValue(c *gin.Context, keys ...string) string {
+	if c == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if value := strings.TrimSpace(c.Query(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// assetQueryIDs parses either a singular group_id/groupId value or a
+// comma-separated group_ids/groupIds value. Repeated query values are also
+// accepted, which keeps the endpoint compatible with standard URL encoders.
+func assetQueryIDs(c *gin.Context, keys ...string) []string {
+	if c == nil {
+		return nil
+	}
+	for _, key := range keys {
+		var ids []string
+		for _, value := range c.QueryArray(key) {
+			ids = append(ids, splitAssetIDs(value)...)
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		seen := make(map[string]struct{}, len(ids))
+		result := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			result = append(result, id)
+		}
+		return result
+	}
+	return nil
 }

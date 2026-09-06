@@ -90,6 +90,30 @@ func TestRestrictProviderResponseFiltersRunyuanPascalCaseGroups(t *testing.T) {
 	require.Contains(t, string(response.Body), `"TotalCount":1`)
 }
 
+func TestAssetQueryAliasesAcceptMobileCloudCamelCase(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet,
+		"/v1/assets?pageNo=2&pageSize=10&groupType=AIGC&groupIds=group-1,group-2&groupIds=group-3",
+		nil)
+
+	require.Equal(t, "2", assetQueryValue(context, "page", "pageNo"))
+	require.Equal(t, "10", assetQueryValue(context, "page_size", "pageSize"))
+	require.Equal(t, "AIGC", assetQueryValue(context, "group_type", "groupType"))
+	require.Equal(t, []string{"group-1", "group-2", "group-3"}, assetQueryIDs(context, "group_id", "groupId", "group_ids", "groupIds"))
+}
+
+func TestAssetQueryAliasesPreferGatewaySpelling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet,
+		"/v1/assets?page=3&pageNo=9&group_id=group-gateway&groupIds=group-upstream",
+		nil)
+
+	require.Equal(t, "3", assetQueryValue(context, "page", "pageNo"))
+	require.Equal(t, []string{"group-gateway"}, assetQueryIDs(context, "group_id", "groupId", "group_ids", "groupIds"))
+}
+
 func TestRestrictRunyuanAssetsToLocallyOwnedIDs(t *testing.T) {
 	response := &mobilecloudasset.Response{Provider: "runyuan", Body: []byte(`{"ResponseMetadata":{"Action":"ListAssets"},"Result":{"Items":[{"Id":"asset-owned","GroupId":"shared"},{"Id":"asset-foreign","GroupId":"shared"}],"TotalCount":2}}`)}
 	restrictProviderAssetResponse(response, map[string]struct{}{"asset-owned": {}})
