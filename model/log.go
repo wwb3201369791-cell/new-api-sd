@@ -417,7 +417,7 @@ type RecordTaskBillingLogParams struct {
 // provider's estimated/settled usage is represented as completion tokens while
 // the full facts remain available in Other. This keeps task rows consistent
 // with the common usage-log table without exposing provider details to users.
-func taskBillingCompletionTokens(other *LogOther) int {
+func TaskBillingCompletionTokens(other *LogOther) int {
 	if other == nil {
 		return 0
 	}
@@ -481,7 +481,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		ChannelId:        params.ChannelId,
 		TokenId:          params.TokenId,
 		Group:            params.Group,
-		CompletionTokens: taskBillingCompletionTokens(params.Other),
+		CompletionTokens: TaskBillingCompletionTokens(params.Other),
 		Other:            params.Other.JSONString(),
 	}
 	err := createLog(log)

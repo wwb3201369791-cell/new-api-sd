@@ -38,12 +38,12 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 func TestTaskBillingCompletionTokensProjectsUsageFacts(t *testing.T) {
 	other := NewLogOther()
 	other.SetPublic("usage_facts", map[string]any{"tokens": float64(108000), "resolution": "1080p"})
-	assert.Equal(t, 108000, taskBillingCompletionTokens(other))
+	assert.Equal(t, 108000, TaskBillingCompletionTokens(other))
 
 	other = NewLogOther()
 	other.SetPublic("usage_facts", map[string]any{"tokens": -1})
-	assert.Equal(t, 0, taskBillingCompletionTokens(other))
-	assert.Equal(t, 0, taskBillingCompletionTokens(nil))
+	assert.Equal(t, 0, TaskBillingCompletionTokens(other))
+	assert.Equal(t, 0, TaskBillingCompletionTokens(nil))
 }
 
 func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
