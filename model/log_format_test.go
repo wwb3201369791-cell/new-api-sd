@@ -35,6 +35,17 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	require.Contains(t, parsed, "model_price")
 }
 
+func TestTaskBillingCompletionTokensProjectsUsageFacts(t *testing.T) {
+	other := NewLogOther()
+	other.SetPublic("usage_facts", map[string]any{"tokens": float64(108000), "resolution": "1080p"})
+	assert.Equal(t, 108000, taskBillingCompletionTokens(other))
+
+	other = NewLogOther()
+	other.SetPublic("usage_facts", map[string]any{"tokens": -1})
+	assert.Equal(t, 0, taskBillingCompletionTokens(other))
+	assert.Equal(t, 0, taskBillingCompletionTokens(nil))
+}
+
 func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
 	other := common.MapToJsonStr(map[string]interface{}{
 		"model_price": 1.25,

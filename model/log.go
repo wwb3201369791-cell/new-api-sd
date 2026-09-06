@@ -412,6 +412,51 @@ type RecordTaskBillingLogParams struct {
 	NodeName  string // 任务发起节点；为空时回退当前节点
 }
 
+// taskBillingCompletionTokens projects the normalized task usage fact into the
+// standard log token column. Task providers do not have prompt tokens, so the
+// provider's estimated/settled usage is represented as completion tokens while
+// the full facts remain available in Other. This keeps task rows consistent
+// with the common usage-log table without exposing provider details to users.
+func taskBillingCompletionTokens(other *LogOther) int {
+	if other == nil {
+		return 0
+	}
+	snapshot := other.Snapshot()
+	facts, ok := snapshot["usage_facts"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch value := facts["tokens"].(type) {
+	case int:
+		return max(value, 0)
+	case int32:
+		return max(int(value), 0)
+	case int64:
+		return max(int(value), 0)
+	case uint:
+		return int(value)
+	case uint32:
+		return int(value)
+	case uint64:
+		if value > uint64(^uint(0)>>1) {
+			return int(^uint(0) >> 1)
+		}
+		return int(value)
+	case float64:
+		if value <= 0 {
+			return 0
+		}
+		return int(value)
+	case float32:
+		if value <= 0 {
+			return 0
+		}
+		return int(value)
+	default:
+		return 0
+	}
+}
+
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	if params.LogType == LogTypeConsume && !common.LogConsumeEnabled {
 		return
@@ -425,18 +470,19 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 	createdAt := common.GetTimestamp()
 	log := &Log{
-		UserId:    params.UserId,
-		Username:  username,
-		CreatedAt: createdAt,
-		Type:      params.LogType,
-		Content:   params.Content,
-		TokenName: tokenName,
-		ModelName: params.ModelName,
-		Quota:     params.Quota,
-		ChannelId: params.ChannelId,
-		TokenId:   params.TokenId,
-		Group:     params.Group,
-		Other:     params.Other.JSONString(),
+		UserId:           params.UserId,
+		Username:         username,
+		CreatedAt:        createdAt,
+		Type:             params.LogType,
+		Content:          params.Content,
+		TokenName:        tokenName,
+		ModelName:        params.ModelName,
+		Quota:            params.Quota,
+		ChannelId:        params.ChannelId,
+		TokenId:          params.TokenId,
+		Group:            params.Group,
+		CompletionTokens: taskBillingCompletionTokens(params.Other),
+		Other:            params.Other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {
