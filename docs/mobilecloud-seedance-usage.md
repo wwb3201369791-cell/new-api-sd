@@ -105,7 +105,7 @@ curl.exe -L -o .\result.mp4 "$BaseUrl/v1/videos/TASK_ID/content" `
 `model`、`content`、`duration`、`resolution`、`ratio` 字段不变。列表和删除
 分别是 `GET /v1/videos`、`DELETE /v1/videos/TASK_ID`。
 
-建议生产请求显式传 `resolution`（`480p`、`720p` 或 `1080p`）。未传或无法
+建议生产请求显式传 `resolution`（`480p`、`720p`、`1080p` 或 `4k`）。未传或无法
 识别时，网关预估计费按 1080p 档位保守预留；任务完成后优先使用上游返回的实际
 token 和分辨率结算，并自动退补差额。管理员可在任务日志中查看预估与最终差额。
 

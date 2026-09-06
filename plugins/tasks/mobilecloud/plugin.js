@@ -27,7 +27,7 @@ export const meta = {
       },
     },
     resolution: {
-      enum: ["480p", "720p", "1080p"],
+      enum: ["480p", "720p", "1080p", "4k"],
       description: {
         en: "Output video resolution; Seedance token unit price varies by resolution tier.",
         zh: "输出视频分辨率；Seedance token 单价随分辨率档位变化。",
@@ -48,6 +48,7 @@ export const meta = {
     { label: "480p · 5s", facts: { tokens: 48038, resolution: "480p", video_input: "none" } },
     { label: "720p · 5s", facts: { tokens: 108000, resolution: "720p", video_input: "none" } },
     { label: "1080p · 5s", facts: { tokens: 243000, resolution: "1080p", video_input: "none" } },
+    { label: "4k · 5s", facts: { tokens: 972000, resolution: "4k", video_input: "none" } },
     { label: "720p · 10s", facts: { tokens: 216000, resolution: "720p", video_input: "none" } },
     { label: "720p · 5s (+4s 输入视频)", facts: { tokens: 194400, resolution: "720p", video_input: "video" } },
   ],
@@ -104,10 +105,11 @@ function rewriteDraftTaskContent(content, originTasks) {
 
 function normalizeResolution(value) {
   const raw = trimmed(value).toLowerCase();
-  if (["480p", "720p", "1080p"].includes(raw)) return raw;
+  if (["480p", "720p", "1080p", "4k"].includes(raw)) return raw;
   const parts = raw.replace("*", "x").split("x");
   if (parts.length !== 2) return "720p";
   const max = Math.max(Number(parts[0]), Number(parts[1]));
+  if (max >= 3840) return "4k";
   if (max >= 1920) return "1080p";
   if (max >= 1280) return "720p";
   return "480p";
@@ -115,7 +117,7 @@ function normalizeResolution(value) {
 
 function isRecognizedResolution(value) {
   const raw = trimmed(value).toLowerCase();
-  if (["480p", "720p", "1080p"].includes(raw)) return true;
+  if (["480p", "720p", "1080p", "4k"].includes(raw)) return true;
   const parts = raw.replace("*", "x").split("x");
   if (parts.length !== 2) return false;
   const width = Number(parts[0]);
@@ -170,6 +172,7 @@ function validateSeedanceDuration(value) {
 function resolutionMaxPixels(resolution) {
   if (resolution === "480p") return [854, 480];
   if (resolution === "1080p") return [1920, 1080];
+  if (resolution === "4k") return [3840, 2160];
   return [1280, 720];
 }
 
@@ -183,9 +186,10 @@ function videoInputRatio(model, resolution, content) {
   const res = normalizeResolution(resolution);
   if (!video) return 1;
   // Mobile Cloud pricing differentiates only by video input and resolution:
-  // 56/92 for 480p/720p, and 62/102 for 1080p. The ratio is used when a
-  // tiered billing expression models the provider's resource-package units.
-  return res === "1080p" ? 62 / 102 : 56 / 92;
+  // 28/46 for 480p/720p, 31/51 for 1080p, and 16/26 for 4k. The ratio is
+  // used when a tiered billing expression models provider resource units.
+  if (res === "4k") return 16 / 26;
+  return res === "1080p" ? 31 / 51 : 28 / 46;
 }
 
 function responsesInput(req) {
@@ -495,7 +499,7 @@ export function extractUsageOnComplete(task, taskResult, body) {
   if (Number.isFinite(tokens) && tokens > 0) facts.tokens = tokens;
   const content = body.content || {};
   const resolution = trimmed(content.resolution || body.resolution).toLowerCase();
-  if (["480p", "720p", "1080p"].includes(resolution)) facts.resolution = resolution;
+  if (["480p", "720p", "1080p", "4k"].includes(resolution)) facts.resolution = resolution;
   return facts;
 }
 

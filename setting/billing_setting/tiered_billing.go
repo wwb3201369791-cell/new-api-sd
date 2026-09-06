@@ -40,13 +40,14 @@ var billingSetting = BillingSetting{
 // default expression so a newly configured task-plugin channel is visible in
 // /v1/models and can be used before an administrator customizes pricing.
 //
-// The expression returns USD for the request. Mobile Cloud's 480p/720p and
-// 1080p rates differ for video-to-video input, so the usage facts supplied by
-// the task plugin select the correct tier at submit and settlement time.
+// The expression returns USD for the request. Mobile Cloud's 480p/720p,
+// 1080p, and 4k rates differ for video-to-video input, so the usage facts
+// supplied by the task plugin select the correct tier at submit and
+// settlement time.
 const defaultSeedanceModel = "doubao-seedance-2.0"
 const defaultSeedanceConcreteModel = "doubao-seedance-2-0-260128"
 
-const defaultSeedanceBillingExpr = `u("video_input") == "video" ? (u("resolution") == "1080p" ? tier("1080p_video", u("tokens") * 62 / 1000000) : tier("480p_720p_video", u("tokens") * 56 / 1000000)) : (u("resolution") == "1080p" ? tier("1080p", u("tokens") * 102 / 1000000) : tier("480p_720p", u("tokens") * 92 / 1000000))`
+const defaultSeedanceBillingExpr = `u("video_input") == "video" ? (u("resolution") == "4k" ? tier("4k_video", u("tokens") * 32 / 1000000) : (u("resolution") == "1080p" ? tier("1080p_video", u("tokens") * 62 / 1000000) : tier("480p_720p_video", u("tokens") * 56 / 1000000))) : (u("resolution") == "4k" ? tier("4k", u("tokens") * 52 / 1000000) : (u("resolution") == "1080p" ? tier("1080p", u("tokens") * 102 / 1000000) : tier("480p_720p", u("tokens") * 92 / 1000000)))`
 
 var defaultBillingMode = map[string]string{
 	defaultSeedanceModel:         BillingModeTieredExpr,

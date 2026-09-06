@@ -114,7 +114,7 @@ func TestDefaultSeedanceBillingExpressionIsAvailableAndUsesPublishedTiers(t *tes
 
 	schema := map[string]jsplugin.UsageFieldSchema{
 		"tokens":      {Type: "number", Unit: "token"},
-		"resolution":  {Enum: []string{"480p", "720p", "1080p"}},
+		"resolution":  {Enum: []string{"480p", "720p", "1080p", "4k"}},
 		"video_input": {Enum: []string{"none", "video"}},
 	}
 	require.NoError(t, SmokeTestTaskExpr(expr, schema))
@@ -124,4 +124,19 @@ func TestDefaultSeedanceBillingExpressionIsAvailableAndUsesPublishedTiers(t *tes
 	}})
 	require.NoError(t, err)
 	assert.InDelta(t, 6.2, result, 0.000001)
+
+	for _, tc := range []struct {
+		resolution string
+		videoInput string
+		want       float64
+	}{
+		{resolution: "4k", videoInput: "none", want: 5.2},
+		{resolution: "4k", videoInput: "video", want: 3.2},
+	} {
+		result, _, err = billingexpr.RunExprWithRequest(expr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: map[string]any{
+			"tokens": 100000.0, "resolution": tc.resolution, "video_input": tc.videoInput,
+		}})
+		require.NoError(t, err)
+		assert.InDelta(t, tc.want, result, 0.000001)
+	}
 }

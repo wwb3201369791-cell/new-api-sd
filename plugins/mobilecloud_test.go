@@ -89,6 +89,26 @@ func TestMobileCloudPluginForwardsSeedanceProviderFields(t *testing.T) {
 	assert.False(t, hasSeconds)
 }
 
+func TestMobileCloudPluginForwards4KResolution(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+		"baseUrl":       "https://mobilecloud.example",
+		"apiKey":        "MAAS_KEY",
+		"upstreamModel": "doubao-seedance-2.0",
+		"requestBody": map[string]any{
+			"model":      "doubao-seedance-2.0",
+			"content":    []any{map[string]any{"type": "text", "text": "a city at night"}},
+			"duration":   5,
+			"resolution": "4k",
+		},
+	})
+	require.NoError(t, err)
+	request := asJSONMap(t, value)
+	body, ok := request["body"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "4k", body["resolution"])
+}
+
 func TestMobileCloudPluginRejectsMalformedSeedanceContent(t *testing.T) {
 	plugin := loadMobileCloudPlugin(t)
 	_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
@@ -302,11 +322,13 @@ func TestMobileCloudPluginEstimatesOmittedResolutionAt1080p(t *testing.T) {
 		{name: "invalid size", resolution: "not-a-size", want: "1080p"},
 		{name: "explicit 720p", resolution: "720p", want: "720p"},
 		{name: "dimensions 1920x1080", resolution: "1920x1080", want: "1080p"},
+		{name: "explicit 4k", resolution: "4k", want: "4k"},
+		{name: "dimensions 3840x2160", resolution: "3840x2160", want: "4k"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requestBody := map[string]any{
 				"duration": 5,
-				"content": []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+				"content":  []any{map[string]any{"type": "text", "text": "a city at dawn"}},
 			}
 			if tc.resolution != nil {
 				requestBody["resolution"] = tc.resolution
@@ -336,14 +358,44 @@ func TestMobileCloudPluginEstimatesOmittedResolutionAt1080p(t *testing.T) {
 	value, err = plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
 		"model": "doubao-seedance-2.0",
 		"requestBody": map[string]any{
-			"duration": 5,
+			"duration":   5,
 			"resolution": "1080p",
-			"content": []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+			"content":    []any{map[string]any{"type": "text", "text": "a city at dawn"}},
 		},
 	})
 	require.NoError(t, err)
 	facts = asJSONMap(t, value)
 	assert.Equal(t, "1080p", facts["resolution"])
+}
+
+func TestMobileCloudPluginExtractsCompleted4KResolution(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", nil, nil, map[string]any{
+		"status":  "succeeded",
+		"usage":   map[string]any{"completion_tokens": 972000},
+		"content": map[string]any{"video_url": "https://cdn.example/result.mp4", "resolution": "4K"},
+	})
+	require.NoError(t, err)
+	facts := asJSONMap(t, value)
+	assert.Equal(t, float64(972000), facts["tokens"])
+	assert.Equal(t, "4k", facts["resolution"])
+}
+
+func TestMobileCloudPluginUses4KVideoInputRatio(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+		"usagePurpose":  "billing_ratios",
+		"upstreamModel": "doubao-seedance-2.0",
+		"requestBody": map[string]any{
+			"resolution": "4k",
+			"content": []any{
+				map[string]any{"type": "video_url", "video_url": map[string]any{"url": "https://cdn.example/input.mp4"}},
+			},
+		},
+	})
+	require.NoError(t, err)
+	facts := asJSONMap(t, value)
+	assert.InDelta(t, 16.0/26.0, facts["video_input_ratio"], 0.000001)
 }
 
 func TestMobileCloudPluginFetchesArtifactsWithGet(t *testing.T) {
