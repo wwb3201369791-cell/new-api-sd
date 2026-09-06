@@ -113,6 +113,16 @@ function normalizeResolution(value) {
   return "480p";
 }
 
+function isRecognizedResolution(value) {
+  const raw = trimmed(value).toLowerCase();
+  if (["480p", "720p", "1080p"].includes(raw)) return true;
+  const parts = raw.replace("*", "x").split("x");
+  if (parts.length !== 2) return false;
+  const width = Number(parts[0]);
+  const height = Number(parts[1]);
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
+}
+
 function hasVideo(content) {
   return Array.isArray(content) && content.some((item) => item && (item.type === "video_url" || Object.prototype.hasOwnProperty.call(item, "video_url")));
 }
@@ -377,7 +387,9 @@ export function extractUsage(ctx) {
   const metadata = req.metadata && typeof req.metadata === "object" && !Array.isArray(req.metadata) ? req.metadata : {};
   const requestContent = contentFromRequest(req);
   if (ctx.usagePurpose === "billing_ratios") {
-    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution || req.resolution || req.size, requestContent);
+    const rawResolution = metadata.resolution || req.resolution || req.size;
+    const resolution = isRecognizedResolution(rawResolution) ? normalizeResolution(rawResolution) : "1080p";
+    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, resolution, requestContent);
     return ratio === 1 ? null : { video_input_ratio: ratio };
   }
   let seconds = Number(req.seconds || req.duration || metadata.duration || 0);
@@ -388,13 +400,11 @@ export function extractUsage(ctx) {
   if (seconds <= 0) seconds = 5;
   seconds = Math.min(seconds, 3600);
   const rawResolution = metadata.resolution || req.resolution || req.size;
-  const raw = trimmed(rawResolution).toLowerCase();
-  const recognized = ["480p", "720p", "1080p"].includes(raw) || raw.replace("*", "x").split("x").length === 2;
-  // Keep the estimate aligned with the provider's documented/default 720p
-  // tier when clients omit resolution.  The previous 1080p fallback caused
-  // an avoidable over-reservation for ordinary text-to-video requests; the
-  // completion hook still replaces the estimate with upstream usage facts.
-  const resolution = recognized ? normalizeResolution(rawResolution) : "720p";
+  const recognized = isRecognizedResolution(rawResolution);
+  // Reserve against the conservative 1080p tier when resolution is omitted or
+  // invalid. The completion hook replaces this estimate with the provider's
+  // actual usage facts and the settlement path refunds or charges the delta.
+  const resolution = recognized ? normalizeResolution(rawResolution) : "1080p";
   return {
     tokens: estimateTokens(seconds, resolution),
     resolution: resolution,
@@ -510,7 +520,7 @@ export const protocols = {
       if (!prompt && images.length === 0) throw new Error("input is required");
       const metadata = Object.assign({}, req.metadata || {});
       if (Object.prototype.hasOwnProperty.call(req, "resolution")) metadata.resolution = req.resolution;
-      else if (req.size && !metadata.resolution) metadata.resolution = normalizeResolution(req.size);
+      else if (req.size && !metadata.resolution && isRecognizedResolution(req.size)) metadata.resolution = normalizeResolution(req.size);
       const requestBody = { model: model, prompt: prompt, metadata: metadata };
       if (images.length) requestBody.images = images;
       if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = validateSeedanceDuration(req.seconds);

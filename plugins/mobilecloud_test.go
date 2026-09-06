@@ -290,19 +290,48 @@ func TestMobileCloudPluginUsesCompletionUsageOnSuccess(t *testing.T) {
 	assert.Equal(t, "720p", facts["resolution"])
 }
 
-func TestMobileCloudPluginEstimatesOmittedResolutionAt720p(t *testing.T) {
+func TestMobileCloudPluginEstimatesOmittedResolutionAt1080p(t *testing.T) {
 	plugin := loadMobileCloudPlugin(t)
+	for _, tc := range []struct {
+		name       string
+		resolution any
+		want       string
+	}{
+		{name: "omitted", want: "1080p"},
+		{name: "invalid", resolution: "cinema", want: "1080p"},
+		{name: "invalid size", resolution: "not-a-size", want: "1080p"},
+		{name: "explicit 720p", resolution: "720p", want: "720p"},
+		{name: "dimensions 1920x1080", resolution: "1920x1080", want: "1080p"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requestBody := map[string]any{
+				"duration": 5,
+				"content": []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+			}
+			if tc.resolution != nil {
+				requestBody["resolution"] = tc.resolution
+			}
+			value, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+				"model":       "doubao-seedance-2.0",
+				"requestBody": requestBody,
+			})
+			require.NoError(t, err)
+			facts := asJSONMap(t, value)
+			assert.Equal(t, tc.want, facts["resolution"])
+			assert.Equal(t, "none", facts["video_input"])
+		})
+	}
 	value, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
 		"model": "doubao-seedance-2.0",
 		"requestBody": map[string]any{
 			"duration": 5,
-			"content": []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+			"size":     "not-a-size",
+			"content":  []any{map[string]any{"type": "text", "text": "a city at dawn"}},
 		},
 	})
 	require.NoError(t, err)
 	facts := asJSONMap(t, value)
-	assert.Equal(t, "720p", facts["resolution"])
-	assert.Equal(t, "none", facts["video_input"])
+	assert.Equal(t, "1080p", facts["resolution"])
 
 	value, err = plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
 		"model": "doubao-seedance-2.0",
