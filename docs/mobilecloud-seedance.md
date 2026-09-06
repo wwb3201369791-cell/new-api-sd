@@ -12,6 +12,7 @@
 客户端继续使用火山方舟 Seedance 兼容接口，不需要感知实际上游：
 
 - `POST /v1/videos`、`GET /v1/videos/:task_id`
+- `POST /v1/video/generations`（旧版兼容别名，与 `/v1/videos` 共用任务插件路由）
 - `GET /v1/videos`、`DELETE /v1/videos/:task_id`
 - `POST /api/v3/contents/generations/tasks`
 - `GET /api/v3/contents/generations/tasks/:task_id`
@@ -21,6 +22,10 @@
 
 任务创建、轮询、结果代理、列表、取消/删除均在网关完成。取消会使用
 Compare-And-Swap 更新本地任务并执行一次额度退款，避免轮询器并发重复退款。
+
+`/v1/videos/:task_id` 只返回任务状态；使用 `/v1/videos/:task_id/content`
+下载完成的视频。Ark 查询接口会返回网关制品地址，客户端不需要也不应该直接
+访问上游临时 URL。
 
 每个响应都会带 `X-Oneapi-Request-Id`；若上游提供请求 ID，同时返回
 `X-Upstream-Request-Id`。上游返回的请求 ID 会写入管理员任务
@@ -68,6 +73,10 @@ ID，因而可以用“网关请求 ID → 上游请求 ID → 任务 ID”定�
 元/百万 token、1080p 为 102 元/百万 token；有输入视频时分别为 56 和 62
 元/百万 token。管理员仍可在分组与模型定价设置中覆盖这组默认值，覆盖后以
 数据库中的表达式为准。
+
+请求未指定或无法识别 `resolution` 时，提交阶段按 720p 进行预估预扣，完成后
+使用上游实际 token/分辨率结算；建议客户端始终显式传入分辨率，避免预估与最终
+金额产生差额。
 
 ### 制品预览与公网地址
 

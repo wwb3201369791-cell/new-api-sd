@@ -390,7 +390,11 @@ export function extractUsage(ctx) {
   const rawResolution = metadata.resolution || req.resolution || req.size;
   const raw = trimmed(rawResolution).toLowerCase();
   const recognized = ["480p", "720p", "1080p"].includes(raw) || raw.replace("*", "x").split("x").length === 2;
-  const resolution = recognized ? normalizeResolution(rawResolution) : "1080p";
+  // Keep the estimate aligned with the provider's documented/default 720p
+  // tier when clients omit resolution.  The previous 1080p fallback caused
+  // an avoidable over-reservation for ordinary text-to-video requests; the
+  // completion hook still replaces the estimate with upstream usage facts.
+  const resolution = recognized ? normalizeResolution(rawResolution) : "720p";
   return {
     tokens: estimateTokens(seconds, resolution),
     resolution: resolution,

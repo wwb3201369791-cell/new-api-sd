@@ -85,6 +85,10 @@ var hostProtocols = []HostProtocolDefinition{
 	}},
 	{Name: "openai_video", Operations: []HostProtocolOperation{
 		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/videos", BodyKinds: []BodyKind{BodyJSON, BodyMultipart}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}},
+		// Keep the pre-OpenAI video path on the same protocol pipeline.  It is a
+		// compatibility alias, but must still be claimed before distribution so
+		// task plugins (and their channel bindings) are selected consistently.
+		{Name: "create", Methods: []string{http.MethodPost}, Path: "/v1/video/generations", BodyKinds: []BodyKind{BodyJSON}, ModelField: "model", RequiredProtocolMembers: []string{"decodeRequest"}},
 		{Name: "retrieve", Methods: []string{http.MethodGet}, Path: "/v1/videos/:task_id", BodyKinds: []BodyKind{BodyNone}, RequiredProtocolMembers: []string{"render"}},
 		{Name: "content", Methods: []string{http.MethodGet, http.MethodHead}, Path: "/v1/videos/:task_id/content", BodyKinds: []BodyKind{BodyNone}, RequiredDriverHooks: []string{"listArtifacts", "buildContentRequest"}},
 		{Name: "list", Methods: []string{http.MethodGet}, Path: "/v1/videos", BodyKinds: []BodyKind{BodyNone}},

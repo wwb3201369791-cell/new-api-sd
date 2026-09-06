@@ -75,6 +75,10 @@ curl.exe -i -X POST "$BaseUrl/v1/videos" `
   --data-raw $body
 ```
 
+`POST /v1/videos` 是推荐入口。为兼容旧版 Seedance 客户端，
+`POST /v1/video/generations` 也使用同一套任务插件路由和渠道选择逻辑，
+请求体可以保持相同；客户端不需要接触移动云 Bearer key。
+
 记录返回的 `id`（即 `TASK_ID`），然后轮询：
 
 ```powershell
@@ -90,9 +94,20 @@ curl.exe -L -o .\result.mp4 "$BaseUrl/v1/videos/TASK_ID/content" `
   -H "Authorization: Bearer $Token"
 ```
 
+状态接口和制品接口是有意分开的：`GET /v1/videos/TASK_ID` 返回 OpenAI
+风格的状态报文，不直接暴露上游地址；`GET /v1/videos/TASK_ID/content`
+负责鉴权后下载 MP4。Ark 兼容接口
+`GET /api/v3/contents/generations/tasks/TASK_ID` 会在 `content.video_url`
+中返回网关生成的制品地址，该地址仍由网关代理上游，不是移动云或火山的私有
+临时地址。
+
 也支持火山方舟风格路径 `/api/v3/contents/generations/tasks`，请求体保持
 `model`、`content`、`duration`、`resolution`、`ratio` 字段不变。列表和删除
 分别是 `GET /v1/videos`、`DELETE /v1/videos/TASK_ID`。
+
+建议生产请求显式传 `resolution`（`480p`、`720p` 或 `1080p`）。未传或无法
+识别时，网关预估计费按 720p 档位预留；任务完成后优先使用上游返回的实际
+token 和分辨率结算，管理员可在任务日志中查看预估与最终差额。
 
 ### 图生视频
 

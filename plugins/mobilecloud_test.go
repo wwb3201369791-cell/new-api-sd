@@ -290,6 +290,33 @@ func TestMobileCloudPluginUsesCompletionUsageOnSuccess(t *testing.T) {
 	assert.Equal(t, "720p", facts["resolution"])
 }
 
+func TestMobileCloudPluginEstimatesOmittedResolutionAt720p(t *testing.T) {
+	plugin := loadMobileCloudPlugin(t)
+	value, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+		"model": "doubao-seedance-2.0",
+		"requestBody": map[string]any{
+			"duration": 5,
+			"content": []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+		},
+	})
+	require.NoError(t, err)
+	facts := asJSONMap(t, value)
+	assert.Equal(t, "720p", facts["resolution"])
+	assert.Equal(t, "none", facts["video_input"])
+
+	value, err = plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+		"model": "doubao-seedance-2.0",
+		"requestBody": map[string]any{
+			"duration": 5,
+			"resolution": "1080p",
+			"content": []any{map[string]any{"type": "text", "text": "a city at dawn"}},
+		},
+	})
+	require.NoError(t, err)
+	facts = asJSONMap(t, value)
+	assert.Equal(t, "1080p", facts["resolution"])
+}
+
 func TestMobileCloudPluginFetchesArtifactsWithGet(t *testing.T) {
 	plugin := loadMobileCloudPlugin(t)
 	value, err := plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{

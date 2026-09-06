@@ -8,20 +8,10 @@ import (
 )
 
 func SetVideoRouter(router *gin.Engine) {
-	videoSharedRouter := router.Group("/v1")
-	videoSharedRouter.Use(middleware.RouteTag("relay"))
-	videoSharedRouter.Use(middleware.TokenAuth())
-	videoSharedRouter.Use(middleware.SystemPerformanceCheck())
-	videoSharedRouter.POST(
-		"/video/generations",
-		middleware.PinTaskPluginEndpoint(),
-		middleware.TaskPluginEndpointOnly(middleware.ModelRequestRateLimit()),
-		middleware.PrepareTaskPluginEndpoint(),
-		middleware.Distribute(),
-		func(c *gin.Context) {
-			controller.RelayTaskPluginEndpoint(c, controller.RelayTask)
-		},
-	)
+	// POST /v1/video/generations is registered by SetTaskPluginProtocolRouter
+	// as the legacy alias of openai_video.create.  Keeping it in that shared
+	// protocol router is important: otherwise it bypasses plugin endpoint
+	// pinning and falls through to generic distributor selection.
 
 	videoV1Router := router.Group("/v1")
 	videoV1Router.Use(middleware.RouteTag("relay"))
