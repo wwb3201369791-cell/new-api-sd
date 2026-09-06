@@ -109,6 +109,11 @@ curl.exe -L -o .\result.mp4 "$BaseUrl/v1/videos/TASK_ID/content" `
 识别时，网关预估计费按 1080p 档位保守预留；任务完成后优先使用上游返回的实际
 token 和分辨率结算，并自动退补差额。管理员可在任务日志中查看预估与最终差额。
 
+核对计费时以任务完成后的用量为准：任务日志的计费明细会同时记录预估档位、
+`usage_facts.tokens`、`usage_facts.resolution`、`usage_facts.video_input` 和最终
+匹配档位。提交阶段的 1080p 只是防止余额预扣不足，不代表最终固定按 1080p 收费；
+上游返回 720p 或实际 token 后，平台会按最终事实自动退补差额。
+
 ### 图生视频
 
 选定渠道需要服务端可以访问的公网 HTTP(S) 地址：
